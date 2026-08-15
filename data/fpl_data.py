@@ -3,6 +3,14 @@ import pandas as pd
 
 def get_players(data):
 
-    players = pd.DataFrame(data["elements"])
+    return pd.DataFrame(data["elements"])
 
-    return players
+
+def get_teams(data):
+
+    return pd.DataFrame(data["teams"])
+
+
+def get_fixtures(data):
+
+    return pd.DataFrame(data["fixtures"])
