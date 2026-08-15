@@ -1,5 +1,8 @@
 import streamlit as st
 
+from data.fpl_api import get_fpl_data
+
+
 st.set_page_config(
     page_title="FPL AI Coach",
     page_icon="⚽",
@@ -8,11 +11,15 @@ st.set_page_config(
 
 st.title("⚽ FPL AI Coach")
 
-st.subheader("Your personal FPL decision engine")
+st.subheader("FPL Data Connection")
 
-st.write(
-    "This application will analyse my FPL team "
-    "and recommend the best transfers."
-)
+try:
+    data = get_fpl_data()
 
-st.success("Application is running!")
+    st.success("Successfully connected to the FPL API!")
+
+    st.write("Number of players:", len(data["elements"]))
+    st.write("Number of teams:", len(data["teams"]))
+
+except Exception as e:
+    st.error(f"Something went wrong: {e}")
