@@ -1,5 +1,4 @@
 import streamlit as st
-import pandas as pd
 
 from data.fpl_api import get_fpl_data
 
@@ -12,37 +11,19 @@ st.set_page_config(
 
 st.title("⚽ FPL AI Coach")
 
-st.subheader("Player Database")
-
+st.subheader("FPL API Structure")
 
 try:
 
     data = get_fpl_data()
 
-    players = pd.DataFrame(data["elements"])
+    st.success("Successfully connected to the FPL API!")
 
-    st.success(
-        f"Successfully loaded {len(players)} players."
-    )
+    st.write("Available data sections:")
 
-    columns = [
-        "id",
-        "first_name",
-        "second_name",
-        "now_cost",
-        "total_points",
-        "form",
-        "selected_by_percent"
-    ]
-
-    st.dataframe(
-        players[columns],
-        use_container_width=True
-    )
-
+    for key in data.keys():
+        st.write(f"- {key}")
 
 except Exception as e:
 
-    st.error(
-        f"Something went wrong: {e}"
-    )
+    st.error(f"Something went wrong: {e}")
