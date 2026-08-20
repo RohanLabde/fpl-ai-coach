@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+from data.historical import load_team_mapping, create_team_mapping
 
 HISTORICAL_2025_26_URL = (
     "https://raw.githubusercontent.com/"
@@ -109,4 +110,34 @@ if st.button("📚 Test Historical Data"):
 
         st.error(
             f"Historical data download failed: {e}"
+        )
+
+st.subheader("Team Mapping Test")
+
+
+if st.button("🔎 Test Team Mapping"):
+
+    try:
+
+        with st.spinner("Downloading team mapping..."):
+
+            team_data = load_team_mapping()
+
+        teams = create_team_mapping(
+            team_data
+        )
+
+        st.success(
+            f"Successfully loaded {len(teams)} teams!"
+        )
+
+        st.dataframe(
+            teams,
+            use_container_width=True
+        )
+
+    except Exception as e:
+
+        st.error(
+            f"Team mapping failed: {e}"
         )
