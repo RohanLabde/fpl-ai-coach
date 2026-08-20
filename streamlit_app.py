@@ -1,4 +1,12 @@
 import streamlit as st
+import pandas as pd
+
+HISTORICAL_2025_26_URL = (
+    "https://raw.githubusercontent.com/"
+    "imadeddine-belkat/Premier-League-Stats/"
+    "main/fpl_scraper/fpl_stats/_merged/players/"
+    "2025-26_all_players_gw.csv"
+)
 
 from data.fpl_api import get_fpl_data
 from data.fpl_data import get_players
@@ -64,3 +72,41 @@ except Exception as e:
     st.error(
         f"Could not read database: {e}"
     )
+
+if st.button("📚 Test Historical Data"):
+
+    try:
+
+        with st.spinner("Downloading 2025/26 historical data..."):
+
+            historical = pd.read_csv(
+                HISTORICAL_2025_26_URL
+            )
+
+        st.success(
+            "Historical data downloaded successfully!"
+        )
+
+        st.write(
+            "Rows:",
+            len(historical)
+        )
+
+        st.write(
+            "Columns:"
+        )
+
+        st.write(
+            historical.columns.tolist()
+        )
+
+        st.dataframe(
+            historical.head(10),
+            use_container_width=True
+        )
+
+    except Exception as e:
+
+        st.error(
+            f"Historical data download failed: {e}"
+        )
