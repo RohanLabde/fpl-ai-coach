@@ -23,6 +23,7 @@ HISTORICAL_2025_26_URL = (
 
 from data.fpl_api import get_fpl_data
 from data.fpl_data import get_players
+from data.features import build_form_features
 
 
 st.set_page_config(
@@ -332,4 +333,101 @@ if st.button(
 
         st.error(
             f"Historical import failed: {e}"
+        )
+
+st.subheader("Prediction Feature Test")
+
+
+if st.button("🧠 Build Form Features"):
+
+    try:
+
+        with st.spinner(
+            "Preparing historical data..."
+        ):
+
+            players, fixtures = (
+                load_historical_data()
+            )
+
+            team_data = load_team_mapping()
+
+            teams = create_team_mapping(
+                team_data
+            )
+
+            historical = (
+                prepare_historical_data(
+                    players,
+                    fixtures,
+                    teams
+                )
+            )
+
+
+        with st.spinner(
+            "Calculating form features..."
+        ):
+
+            features = build_form_features(
+                historical
+            )
+
+
+        st.success(
+            "Form features created successfully!"
+        )
+
+
+        # --------------------------------
+        # Basic metrics
+        # --------------------------------
+
+        col1, col2, col3 = st.columns(3)
+
+        col1.metric(
+            "Feature rows",
+            len(features)
+        )
+
+        col2.metric(
+            "Players",
+            features["player_id"].nunique()
+        )
+
+        col3.metric(
+            "Gameweeks",
+            features["gameweek"].nunique()
+        )
+
+
+        # --------------------------------
+        # Preview
+        # --------------------------------
+
+        st.subheader(
+            "Prediction Feature Preview"
+        )
+
+        st.dataframe(
+            features[
+                [
+                    "gameweek",
+                    "player_name",
+                    "team_name",
+                    "previous_gw_points",
+                    "rolling_3gw_points",
+                    "rolling_5gw_points",
+                    "rolling_10gw_points",
+                    "next_gw_points"
+                ]
+            ].head(30),
+            use_container_width=True
+        )
+
+
+    except Exception as e:
+
+        st.error(
+            f"Feature engineering failed: {e}"
         )
