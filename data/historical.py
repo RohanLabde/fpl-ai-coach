@@ -79,33 +79,37 @@ def prepare_historical_data(
     # -----------------------------------
     # 1. Prepare fixture data
     # -----------------------------------
-
+    
     fixture_data = fixtures[
         [
             "code",
             "event",
             "id",
             "team_h",
-            "team_a"
+            "team_a",
+            "team_h_difficulty",
+            "team_a_difficulty"
         ]
     ].copy()
-
+    
     fixture_data = fixture_data.rename(
         columns={
             "code": "fixture_code",
             "event": "gameweek",
             "id": "fixture_id",
             "team_h": "home_team_id",
-            "team_a": "away_team_id"
+            "team_a": "away_team_id",
+            "team_h_difficulty": "home_fixture_difficulty",
+            "team_a_difficulty": "away_fixture_difficulty"
         }
     )
-
-
+    
+    
     # -----------------------------------
     # 2. Map historical team_code
     #    to FPL team_id
     # -----------------------------------
-
+    
     players = players.merge(
         teams[
             [
@@ -118,23 +122,23 @@ def prepare_historical_data(
         on="team_code",
         how="left"
     )
-
-
+    
+    
     # -----------------------------------
     # 3. Join player data with fixtures
     # -----------------------------------
-
+    
     merged = players.merge(
         fixture_data,
         on="fixture_code",
         how="left"
     )
-
-
+    
+    
     # -----------------------------------
     # 4. Determine opponent
     # -----------------------------------
-
+    
     merged["opponent_team_id"] = merged.apply(
         lambda row:
             row["away_team_id"]
@@ -142,22 +146,35 @@ def prepare_historical_data(
             else row["home_team_id"],
         axis=1
     )
-
-
+    
+    
     # -----------------------------------
     # 5. Determine home/away
     # -----------------------------------
-
+    
     merged["was_home"] = (
         merged["team_id"] ==
         merged["home_team_id"]
     )
-
-
+    
+    
     # -----------------------------------
-    # 6. Rename player identifier
+    # 6. Determine fixture difficulty
     # -----------------------------------
-
+    
+    merged["fixture_difficulty"] = (
+        merged["home_fixture_difficulty"]
+        .where(
+            merged["was_home"],
+            merged["away_fixture_difficulty"]
+        )
+    )
+    
+    
+    # -----------------------------------
+    # 7. Rename player identifier
+    # -----------------------------------
+    
     merged = merged.rename(
         columns={
             "element": "player_id",
@@ -165,26 +182,26 @@ def prepare_historical_data(
             "second_name": "second_name"
         }
     )
-
-
+    
+    
     # -----------------------------------
-    # 7. Create player name
+    # 8. Create player name
     # -----------------------------------
-
+    
     merged["player_name"] = (
         merged["first_name"].fillna("")
         + " "
         + merged["second_name"].fillna("")
     ).str.strip()
-
-
+    
+    
     # -----------------------------------
-    # 8. Create season
+    # 9. Create season
     # -----------------------------------
-
+    
     merged["season"] = "2025-26"
-
-
+    
+    
     return merged
 
 def prepare_database_records(historical):
@@ -234,7 +251,8 @@ def prepare_database_records(historical):
             "transfers_balance",
             "selected",
             "transfers_in",
-            "transfers_out"
+            "transfers_out",
+            "fixture_difficulty"
         ]
     ].copy()
 
