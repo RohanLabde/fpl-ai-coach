@@ -77,3 +77,185 @@ def save_players(players):
             )
 
         session.commit()
+
+def save_historical_data(records):
+
+    conn = get_database_connection()
+
+    sql = text(
+        """
+        INSERT INTO player_gameweek (
+            season,
+            gameweek,
+            player_id,
+            player_name,
+            position,
+            team_id,
+            team_code,
+            team_name,
+            fixture_id,
+            fixture_code,
+            opponent_team_id,
+            was_home,
+            minutes,
+            starts,
+            total_points,
+            goals_scored,
+            assists,
+            clean_sheets,
+            goals_conceded,
+            own_goals,
+            penalties_saved,
+            penalties_missed,
+            saves,
+            yellow_cards,
+            red_cards,
+            bonus,
+            bps,
+            influence,
+            creativity,
+            threat,
+            ict_index,
+            clearances_blocks_interceptions,
+            recoveries,
+            tackles,
+            defensive_contribution,
+            expected_goals,
+            expected_assists,
+            expected_goal_involvements,
+            expected_goals_conceded,
+            price,
+            transfers_balance,
+            selected,
+            transfers_in,
+            transfers_out
+        )
+        VALUES (
+            :season,
+            :gameweek,
+            :player_id,
+            :player_name,
+            :position,
+            :team_id,
+            :team_code,
+            :team_name,
+            :fixture_id,
+            :fixture_code,
+            :opponent_team_id,
+            :was_home,
+            :minutes,
+            :starts,
+            :total_points,
+            :goals_scored,
+            :assists,
+            :clean_sheets,
+            :goals_conceded,
+            :own_goals,
+            :penalties_saved,
+            :penalties_missed,
+            :saves,
+            :yellow_cards,
+            :red_cards,
+            :bonus,
+            :bps,
+            :influence,
+            :creativity,
+            :threat,
+            :ict_index,
+            :clearances_blocks_interceptions,
+            :recoveries,
+            :tackles,
+            :defensive_contribution,
+            :expected_goals,
+            :expected_assists,
+            :expected_goal_involvements,
+            :expected_goals_conceded,
+            :price,
+            :transfers_balance,
+            :selected,
+            :transfers_in,
+            :transfers_out
+        )
+        ON CONFLICT (
+            season,
+            gameweek,
+            player_id,
+            fixture_id
+        )
+        DO UPDATE SET
+            player_name = EXCLUDED.player_name,
+            position = EXCLUDED.position,
+            team_id = EXCLUDED.team_id,
+            team_code = EXCLUDED.team_code,
+            team_name = EXCLUDED.team_name,
+            fixture_code = EXCLUDED.fixture_code,
+            opponent_team_id = EXCLUDED.opponent_team_id,
+            was_home = EXCLUDED.was_home,
+            minutes = EXCLUDED.minutes,
+            starts = EXCLUDED.starts,
+            total_points = EXCLUDED.total_points,
+            goals_scored = EXCLUDED.goals_scored,
+            assists = EXCLUDED.assists,
+            clean_sheets = EXCLUDED.clean_sheets,
+            goals_conceded = EXCLUDED.goals_conceded,
+            own_goals = EXCLUDED.own_goals,
+            penalties_saved = EXCLUDED.penalties_saved,
+            penalties_missed = EXCLUDED.penalties_missed,
+            saves = EXCLUDED.saves,
+            yellow_cards = EXCLUDED.yellow_cards,
+            red_cards = EXCLUDED.red_cards,
+            bonus = EXCLUDED.bonus,
+            bps = EXCLUDED.bps,
+            influence = EXCLUDED.influence,
+            creativity = EXCLUDED.creativity,
+            threat = EXCLUDED.threat,
+            ict_index = EXCLUDED.ict_index,
+            clearances_blocks_interceptions =
+                EXCLUDED.clearances_blocks_interceptions,
+            recoveries = EXCLUDED.recoveries,
+            tackles = EXCLUDED.tackles,
+            defensive_contribution =
+                EXCLUDED.defensive_contribution,
+            expected_goals = EXCLUDED.expected_goals,
+            expected_assists = EXCLUDED.expected_assists,
+            expected_goal_involvements =
+                EXCLUDED.expected_goal_involvements,
+            expected_goals_conceded =
+                EXCLUDED.expected_goals_conceded,
+            price = EXCLUDED.price,
+            transfers_balance = EXCLUDED.transfers_balance,
+            selected = EXCLUDED.selected,
+            transfers_in = EXCLUDED.transfers_in,
+            transfers_out = EXCLUDED.transfers_out
+        """
+    )
+
+    # Convert dataframe into dictionaries
+    data = records.to_dict(
+        orient="records"
+    )
+
+    batch_size = 500
+
+    total = len(data)
+
+    with conn.session as session:
+
+        for start in range(
+            0,
+            total,
+            batch_size
+        ):
+
+            batch = data[
+                start:start + batch_size
+            ]
+
+            session.execute(
+                sql,
+                batch
+            )
+
+            session.commit()
+
+    return total
