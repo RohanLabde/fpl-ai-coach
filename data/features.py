@@ -126,58 +126,58 @@ def build_form_features(historical):
     # ---------------------------------------
 
     features = df[
-    [
-        "season",
-        "gameweek",
-        "player_id",
-        "player_name",
-        "position",
-        "team_id",
-        "team_name",
-
-        # -------------------------
-        # Form
-        # -------------------------
-
-        "previous_gw_points",
-        "rolling_3gw_points",
-        "rolling_5gw_points",
-        "rolling_10gw_points",
-
-        # -------------------------
-        # xG
-        # -------------------------
-
-        "previous_gw_xg",
-        "rolling_3gw_xg",
-        "rolling_5gw_xg",
-        "rolling_10gw_xg",
-
-        # -------------------------
-        # xA
-        # -------------------------
-
-        "previous_gw_xa",
-        "rolling_3gw_xa",
-        "rolling_5gw_xa",
-        "rolling_10gw_xa",
-
-        # -------------------------
-        # xGI
-        # -------------------------
-
-        "previous_gw_xgi",
-        "rolling_3gw_xgi",
-        "rolling_5gw_xgi",
-        "rolling_10gw_xgi",
-
-        # -------------------------
-        # Target
-        # -------------------------
-
-        "next_gw_points"
-    ]
-].copy()
+        [
+            "season",
+            "gameweek",
+            "player_id",
+            "player_name",
+            "position",
+            "team_id",
+            "team_name",
+    
+            # -------------------------
+            # Form
+            # -------------------------
+    
+            "previous_gw_points",
+            "rolling_3gw_points",
+            "rolling_5gw_points",
+            "rolling_10gw_points",
+    
+            # -------------------------
+            # xG
+            # -------------------------
+    
+            "previous_gw_xg",
+            "rolling_3gw_xg",
+            "rolling_5gw_xg",
+            "rolling_10gw_xg",
+    
+            # -------------------------
+            # xA
+            # -------------------------
+    
+            "previous_gw_xa",
+            "rolling_3gw_xa",
+            "rolling_5gw_xa",
+            "rolling_10gw_xa",
+    
+            # -------------------------
+            # xGI
+            # -------------------------
+    
+            "previous_gw_xgi",
+            "rolling_3gw_xgi",
+            "rolling_5gw_xgi",
+            "rolling_10gw_xgi",
+    
+            # -------------------------
+            # Target
+            # -------------------------
+    
+            "next_gw_points"
+        ]
+    ].copy()
 
     return features
 
