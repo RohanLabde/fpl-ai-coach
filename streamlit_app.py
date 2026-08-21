@@ -4,7 +4,14 @@ from data.historical import (
     load_historical_data,
     load_team_mapping,
     create_team_mapping,
-    prepare_historical_data
+    prepare_historical_data,
+    prepare_database_records
+)
+
+from data.db import (
+    get_database_connection,
+    save_players,
+    save_historical_data
 )
 
 HISTORICAL_2025_26_URL = (
@@ -16,7 +23,6 @@ HISTORICAL_2025_26_URL = (
 
 from data.fpl_api import get_fpl_data
 from data.fpl_data import get_players
-from data.db import get_database_connection, save_players
 
 
 st.set_page_config(
@@ -257,4 +263,73 @@ if st.button("🔗 Test Player + Fixture Join"):
 
         st.error(
             f"Historical join failed: {e}"
+        )
+
+st.subheader("Historical Database Import")
+
+
+if st.button(
+    "💾 Import 2025/26 into Supabase"
+):
+
+    try:
+
+        with st.spinner(
+            "Downloading historical data..."
+        ):
+
+            players, fixtures = (
+                load_historical_data()
+            )
+
+            team_data = load_team_mapping()
+
+            teams = create_team_mapping(
+                team_data
+            )
+
+
+        with st.spinner(
+            "Preparing historical records..."
+        ):
+
+            historical = (
+                prepare_historical_data(
+                    players,
+                    fixtures,
+                    teams
+                )
+            )
+
+            records = (
+                prepare_database_records(
+                    historical
+                )
+            )
+
+
+        st.info(
+            f"Ready to import {len(records):,} records."
+        )
+
+
+        with st.spinner(
+            "Importing records into Supabase..."
+        ):
+
+            imported = save_historical_data(
+                records
+            )
+
+
+        st.success(
+            f"Successfully imported "
+            f"{imported:,} historical records!"
+        )
+
+
+    except Exception as e:
+
+        st.error(
+            f"Historical import failed: {e}"
         )
