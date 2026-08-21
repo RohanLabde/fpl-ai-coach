@@ -121,6 +121,9 @@ def build_form_features(historical):
         df
     )
 
+    df = add_playing_time_features(
+        df
+    )
     # ---------------------------------------
     # 8. Keep only the fields we currently need
     # ---------------------------------------
@@ -170,7 +173,25 @@ def build_form_features(historical):
             "rolling_3gw_xgi",
             "rolling_5gw_xgi",
             "rolling_10gw_xgi",
-    
+
+            # -------------------------
+            # Playing time
+            # -------------------------
+            
+            "previous_gw_minutes",
+            "rolling_3gw_minutes",
+            "rolling_5gw_minutes",
+            "rolling_10gw_minutes",
+            
+            "previous_gw_starts",
+            "rolling_3gw_starts",
+            "rolling_5gw_starts",
+            "rolling_10gw_starts",
+            
+            "rolling_3gw_start_rate",
+            "rolling_5gw_start_rate",
+            "rolling_10gw_start_rate",
+            
             # -------------------------
             # Target
             # -------------------------
@@ -298,6 +319,171 @@ def add_underlying_performance_features(df):
     add_rolling_features(
         "expected_goal_involvements",
         "xgi"
+    )
+
+
+    return df
+
+def add_playing_time_features(df):
+
+    df = df.copy()
+
+    # ---------------------------------------
+    # Sort chronologically
+    # ---------------------------------------
+
+    df = df.sort_values(
+        [
+            "season",
+            "player_id",
+            "gameweek"
+        ]
+    ).reset_index(drop=True)
+
+
+    # ---------------------------------------
+    # Helper function
+    # ---------------------------------------
+
+    def add_rolling_features(
+        source_column,
+        prefix
+    ):
+
+        # Previous Gameweek
+        df[f"previous_gw_{prefix}"] = (
+            df
+            .groupby(
+                ["season", "player_id"]
+            )[source_column]
+            .shift(1)
+        )
+
+
+        # Rolling 3 Gameweeks
+        df[f"rolling_3gw_{prefix}"] = (
+            df
+            .groupby(
+                ["season", "player_id"]
+            )[source_column]
+            .transform(
+                lambda x:
+                    x.shift(1)
+                    .rolling(
+                        window=3,
+                        min_periods=3
+                    )
+                    .mean()
+            )
+        )
+
+
+        # Rolling 5 Gameweeks
+        df[f"rolling_5gw_{prefix}"] = (
+            df
+            .groupby(
+                ["season", "player_id"]
+            )[source_column]
+            .transform(
+                lambda x:
+                    x.shift(1)
+                    .rolling(
+                        window=5,
+                        min_periods=5
+                    )
+                    .mean()
+            )
+        )
+
+
+        # Rolling 10 Gameweeks
+        df[f"rolling_10gw_{prefix}"] = (
+            df
+            .groupby(
+                ["season", "player_id"]
+            )[source_column]
+            .transform(
+                lambda x:
+                    x.shift(1)
+                    .rolling(
+                        window=10,
+                        min_periods=10
+                    )
+                    .mean()
+            )
+        )
+
+
+    # ---------------------------------------
+    # Minutes
+    # ---------------------------------------
+
+    add_rolling_features(
+        "minutes",
+        "minutes"
+    )
+
+
+    # ---------------------------------------
+    # Starts
+    # ---------------------------------------
+
+    add_rolling_features(
+        "starts",
+        "starts"
+    )
+
+
+    # ---------------------------------------
+    # Starting rate
+    # ---------------------------------------
+
+    df["rolling_3gw_start_rate"] = (
+        df
+        .groupby(
+            ["season", "player_id"]
+        )["starts"]
+        .transform(
+            lambda x:
+                x.shift(1)
+                .rolling(
+                    window=3,
+                    min_periods=3
+                )
+                .mean()
+        )
+    )
+
+    df["rolling_5gw_start_rate"] = (
+        df
+        .groupby(
+            ["season", "player_id"]
+        )["starts"]
+        .transform(
+            lambda x:
+                x.shift(1)
+                .rolling(
+                    window=5,
+                    min_periods=5
+                )
+                .mean()
+        )
+    )
+
+    df["rolling_10gw_start_rate"] = (
+        df
+        .groupby(
+            ["season", "player_id"]
+        )["starts"]
+        .transform(
+            lambda x:
+                x.shift(1)
+                .rolling(
+                    window=10,
+                    min_periods=10
+                )
+                .mean()
+        )
     )
 
 
