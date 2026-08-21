@@ -102,28 +102,22 @@ def build_form_features(historical):
     )
 
 
-    # ---------------------------------------
-    # 6. Actual points in the target GW
-    #
-    # This is what the model will eventually
-    # learn to predict.
-    # ---------------------------------------
+    # Add underlying performance features
 
-    df["next_gw_points"] = (
-        df["total_points"]
-    )
-
-    # ---------------------------------------
-    # 7. Add underlying performance features
-    # ---------------------------------------
-    
     df = add_underlying_performance_features(
         df
     )
-
+    
+    # Add playing-time features
+    
     df = add_playing_time_features(
         df
     )
+    
+    # Actual points in target GW
+    
+    df["next_gw_points"] = df["total_points"]
+
     # ---------------------------------------
     # 8. Keep only the fields we currently need
     # ---------------------------------------
