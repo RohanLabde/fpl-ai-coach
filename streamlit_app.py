@@ -1,6 +1,11 @@
 import streamlit as st
 import pandas as pd
-from data.historical import load_team_mapping, create_team_mapping
+from data.historical import (
+    load_historical_data,
+    load_team_mapping,
+    create_team_mapping,
+    prepare_historical_data
+)
 
 HISTORICAL_2025_26_URL = (
     "https://raw.githubusercontent.com/"
@@ -140,4 +145,116 @@ if st.button("🔎 Test Team Mapping"):
 
         st.error(
             f"Team mapping failed: {e}"
+        )
+
+st.subheader("Historical Data Join Test")
+
+
+if st.button("🔗 Test Player + Fixture Join"):
+
+    try:
+
+        with st.spinner(
+            "Downloading historical datasets..."
+        ):
+
+            players, fixtures = (
+                load_historical_data()
+            )
+
+            team_data = load_team_mapping()
+
+            teams = create_team_mapping(
+                team_data
+            )
+
+
+        with st.spinner(
+            "Joining player, fixture and team data..."
+        ):
+
+            historical = prepare_historical_data(
+                players,
+                fixtures,
+                teams
+            )
+
+
+        st.success(
+            "Historical data joined successfully!"
+        )
+
+
+        # --------------------------------
+        # Validation metrics
+        # --------------------------------
+
+        col1, col2, col3, col4 = st.columns(4)
+
+
+        col1.metric(
+            "Player rows",
+            len(historical)
+        )
+
+
+        col2.metric(
+            "Gameweeks",
+            historical["gameweek"].nunique()
+        )
+
+
+        col3.metric(
+            "Fixtures",
+            historical["fixture_id"].nunique()
+        )
+
+
+        col4.metric(
+            "Missing fixtures",
+            historical["fixture_id"].isna().sum()
+        )
+
+
+        # --------------------------------
+        # Preview
+        # --------------------------------
+
+        st.subheader(
+            "Historical Data Preview"
+        )
+
+
+        preview_columns = [
+            "season",
+            "gameweek",
+            "player_id",
+            "player_name",
+            "position",
+            "team_id",
+            "team_name",
+            "fixture_id",
+            "opponent_team_id",
+            "was_home",
+            "minutes",
+            "total_points",
+            "goals_scored",
+            "assists",
+            "expected_goals",
+            "expected_assists"
+        ]
+
+
+        st.dataframe(
+            historical[
+                preview_columns
+            ].head(20),
+            use_container_width=True
+        )
+
+
+    except Exception as e:
+
+        st.error(
+            f"Historical join failed: {e}"
         )
