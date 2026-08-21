@@ -412,26 +412,33 @@ if st.button("🧠 Build Form Features"):
         st.dataframe(
         features[
             [
+            [
                 "gameweek",
                 "player_name",
                 "team_name",
-    
-                "previous_gw_points",
+            
+                # Form
                 "rolling_3gw_points",
                 "rolling_5gw_points",
-    
-                "previous_gw_xg",
+            
+                # Underlying performance
                 "rolling_3gw_xg",
-                "rolling_5gw_xg",
-    
-                "previous_gw_xa",
                 "rolling_3gw_xa",
-                "rolling_5gw_xa",
-    
-                "previous_gw_xgi",
                 "rolling_3gw_xgi",
-                "rolling_5gw_xgi",
-    
+            
+                # Playing time
+                "previous_gw_minutes",
+                "rolling_3gw_minutes",
+                "rolling_5gw_minutes",
+            
+                "previous_gw_starts",
+                "rolling_3gw_starts",
+                "rolling_5gw_starts",
+            
+                "rolling_3gw_start_rate",
+                "rolling_5gw_start_rate",
+            
+                # Target
                 "next_gw_points"
             ]
         ].head(30),
