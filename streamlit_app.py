@@ -412,7 +412,6 @@ if st.button("🧠 Build Form Features"):
         st.dataframe(
         features[
             [
-            [
                 "gameweek",
                 "player_name",
                 "team_name",
