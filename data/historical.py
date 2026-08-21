@@ -186,3 +186,126 @@ def prepare_historical_data(
 
 
     return merged
+
+def prepare_database_records(historical):
+
+    records = historical[
+        [
+            "season",
+            "gameweek",
+            "player_id",
+            "player_name",
+            "position",
+            "team_id",
+            "team_code",
+            "team_name",
+            "fixture_id",
+            "fixture_code",
+            "opponent_team_id",
+            "was_home",
+            "minutes",
+            "starts",
+            "total_points",
+            "goals_scored",
+            "assists",
+            "clean_sheets",
+            "goals_conceded",
+            "own_goals",
+            "penalties_saved",
+            "penalties_missed",
+            "saves",
+            "yellow_cards",
+            "red_cards",
+            "bonus",
+            "bps",
+            "influence",
+            "creativity",
+            "threat",
+            "ict_index",
+            "clearances_blocks_interceptions",
+            "recoveries",
+            "tackles",
+            "defensive_contribution",
+            "expected_goals",
+            "expected_assists",
+            "expected_goal_involvements",
+            "expected_goals_conceded",
+            "value",
+            "transfers_balance",
+            "selected",
+            "transfers_in",
+            "transfers_out"
+        ]
+    ].copy()
+
+    # Convert FPL's price representation.
+    # Example: 55 = £5.5m
+    records["price"] = (
+        pd.to_numeric(
+            records["value"],
+            errors="coerce"
+        ) / 10
+    )
+
+    records = records.drop(
+        columns=["value"]
+    )
+
+    # Convert numeric columns
+    numeric_columns = [
+        "gameweek",
+        "player_id",
+        "team_id",
+        "team_code",
+        "fixture_id",
+        "fixture_code",
+        "opponent_team_id",
+        "minutes",
+        "starts",
+        "total_points",
+        "goals_scored",
+        "assists",
+        "clean_sheets",
+        "goals_conceded",
+        "own_goals",
+        "penalties_saved",
+        "penalties_missed",
+        "saves",
+        "yellow_cards",
+        "red_cards",
+        "bonus",
+        "bps",
+        "influence",
+        "creativity",
+        "threat",
+        "ict_index",
+        "clearances_blocks_interceptions",
+        "recoveries",
+        "tackles",
+        "defensive_contribution",
+        "expected_goals",
+        "expected_assists",
+        "expected_goal_involvements",
+        "expected_goals_conceded",
+        "price",
+        "transfers_balance",
+        "selected",
+        "transfers_in",
+        "transfers_out"
+    ]
+
+    for column in numeric_columns:
+
+        records[column] = pd.to_numeric(
+            records[column],
+            errors="coerce"
+        )
+
+    # Replace pandas NaN values with Python None.
+    # PostgreSQL understands None as NULL.
+    records = records.astype(object).where(
+        pd.notna(records),
+        None
+    )
+
+    return records
