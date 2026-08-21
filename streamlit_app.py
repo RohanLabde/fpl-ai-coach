@@ -410,20 +410,33 @@ if st.button("🧠 Build Form Features"):
         )
 
         st.dataframe(
-            features[
-                [
-                    "gameweek",
-                    "player_name",
-                    "team_name",
-                    "previous_gw_points",
-                    "rolling_3gw_points",
-                    "rolling_5gw_points",
-                    "rolling_10gw_points",
-                    "next_gw_points"
-                ]
-            ].head(30),
-            use_container_width=True
-        )
+        features[
+            [
+                "gameweek",
+                "player_name",
+                "team_name",
+    
+                "previous_gw_points",
+                "rolling_3gw_points",
+                "rolling_5gw_points",
+    
+                "previous_gw_xg",
+                "rolling_3gw_xg",
+                "rolling_5gw_xg",
+    
+                "previous_gw_xa",
+                "rolling_3gw_xa",
+                "rolling_5gw_xa",
+    
+                "previous_gw_xgi",
+                "rolling_3gw_xgi",
+                "rolling_5gw_xgi",
+    
+                "next_gw_points"
+            ]
+        ].head(30),
+        use_container_width=True
+    )
 
 
     except Exception as e:
