@@ -243,6 +243,7 @@ if st.button("🔗 Test Player + Fixture Join"):
             "fixture_id",
             "opponent_team_id",
             "was_home",
+            "fixture_difficulty",
             "minutes",
             "total_points",
             "goals_scored",
