@@ -19,7 +19,7 @@ from data.db import (
     get_database_connection,
     save_players,
     save_historical_data,
-    save_prediction_features    
+    save_prediction_features
 )
 
 HISTORICAL_2025_26_URL = (
