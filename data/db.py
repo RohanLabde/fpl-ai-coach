@@ -417,6 +417,12 @@ def save_prediction_features(features):
         flush=True
     )
     
+    # ---------------------------------------------------------
+    # DEBUG: Check for duplicate database keys
+    # ---------------------------------------------------------
+    
+    from collections import Counter
+    
     keys = [
         (
             row["season"],
@@ -426,17 +432,50 @@ def save_prediction_features(features):
         for row in data
     ]
     
-    unique_keys = set(keys)
+    key_counts = Counter(keys)
+    
+    duplicate_keys = {
+        key: count
+        for key, count in key_counts.items()
+        if count > 1
+    }
+    
+    duplicate_record_count = sum(
+        count - 1
+        for count in key_counts.values()
+        if count > 1
+    )
     
     print(
-        f"DEBUG: unique (season, gameweek, player_id) keys = {len(unique_keys)}",
+        f"DEBUG: unique (season, gameweek, player_id) keys = "
+        f"{len(key_counts)}",
         flush=True
     )
     
     print(
-        f"DEBUG: duplicate key records = {len(keys) - len(unique_keys)}",
+        f"DEBUG: duplicate key records = "
+        f"{duplicate_record_count}",
         flush=True
     )
+    
+    print(
+        f"DEBUG: number of duplicated keys = "
+        f"{len(duplicate_keys)}",
+        flush=True
+    )
+    
+    # Print first 20 duplicated keys
+    for key, count in list(duplicate_keys.items())[:20]:
+    
+        print(
+            f"DEBUG DUPLICATE KEY: "
+            f"season={key[0]}, "
+            f"gameweek={key[1]}, "
+            f"player_id={key[2]}, "
+            f"occurrences={count}",
+            flush=True
+        )
+    
     batch_size = 500
     total = len(data)
 
