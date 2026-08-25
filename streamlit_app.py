@@ -467,7 +467,7 @@ if st.button("🔮 Test Arsenal Fixture Horizon"):
     test_team_id = 1
     test_current_gameweek = 10
 
-    fixtures = get_fixtures()
+    fixtures = pd.DataFrame(get_fixtures())
     fixture_horizon = get_team_fixture_horizon(
         fixtures,
         team_id=test_team_id,
