@@ -3,7 +3,8 @@ import pandas as pd
 
 from data.fixture_engine import (
     get_team_fixture_horizon,
-    summarize_fixture_horizon
+    summarize_fixture_horizon,
+    build_fixture_features
 )
 
 from data.historical import (
@@ -491,3 +492,26 @@ if st.button("🔮 Test Arsenal Fixture Horizon"):
     st.subheader("Fixture Summary")
 
     st.json(summary)
+
+st.header("Fixture Feature Test")
+
+if st.button("🧪 Build Fixture Features"):
+
+    fixtures = pd.DataFrame(get_fixtures())
+
+    fixture_features = build_fixture_features(
+        fixtures
+    )
+
+    st.success(
+        "Fixture features created successfully!"
+    )
+
+    st.write(
+        f"Rows: {len(fixture_features)}"
+    )
+
+    st.dataframe(
+        fixture_features.head(20),
+        use_container_width=True
+    )
