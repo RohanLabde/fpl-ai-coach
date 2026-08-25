@@ -1,5 +1,11 @@
 import streamlit as st
 import pandas as pd
+
+from data.fixture_engine import (
+    get_team_fixture_horizon,
+    summarize_fixture_horizon
+)
+
 from data.historical import (
     load_historical_data,
     load_team_mapping,
@@ -451,3 +457,36 @@ if st.button("🧠 Build Form Features"):
         st.error(
             f"Feature engineering failed: {e}"
         )
+
+st.divider()
+
+st.header("Fixture Horizon Test")
+
+if st.button("🔮 Test Arsenal Fixture Horizon"):
+
+    test_team_id = 1
+    test_current_gameweek = 10
+
+    fixture_horizon = get_team_fixture_horizon(
+        fixtures,
+        team_id=test_team_id,
+        current_gameweek=test_current_gameweek,
+        horizon=5
+    )
+
+    st.subheader("Arsenal — Next 5 Gameweeks")
+
+    st.dataframe(
+        fixture_horizon,
+        use_container_width=True
+    )
+
+    summary = summarize_fixture_horizon(
+        fixtures,
+        team_id=test_team_id,
+        current_gameweek=test_current_gameweek
+    )
+
+    st.subheader("Fixture Summary")
+
+    st.json(summary)
