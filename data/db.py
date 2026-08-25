@@ -259,3 +259,177 @@ def save_historical_data(records):
             session.commit()
 
     return total
+
+def save_prediction_features(features):
+
+    conn = get_database_connection()
+
+    sql = text(
+        """
+        INSERT INTO prediction_features (
+            season,
+            gameweek,
+            player_id,
+            player_name,
+            position,
+            team_id,
+            team_name,
+
+            previous_gw_points,
+            rolling_3gw_points,
+            rolling_5gw_points,
+            rolling_10gw_points,
+
+            previous_gw_xg,
+            rolling_3gw_xg,
+            rolling_5gw_xg,
+            rolling_10gw_xg,
+
+            previous_gw_xa,
+            rolling_3gw_xa,
+            rolling_5gw_xa,
+            rolling_10gw_xa,
+
+            previous_gw_xgi,
+            rolling_3gw_xgi,
+            rolling_5gw_xgi,
+            rolling_10gw_xgi,
+
+            previous_gw_minutes,
+            rolling_3gw_minutes,
+            rolling_5gw_minutes,
+            rolling_10gw_minutes,
+
+            previous_gw_starts,
+            rolling_3gw_starts,
+            rolling_5gw_starts,
+            rolling_10gw_starts,
+
+            rolling_3gw_start_rate,
+            rolling_5gw_start_rate,
+            rolling_10gw_start_rate,
+
+            next_gw_points
+        )
+        VALUES (
+            :season,
+            :gameweek,
+            :player_id,
+            :player_name,
+            :position,
+            :team_id,
+            :team_name,
+
+            :previous_gw_points,
+            :rolling_3gw_points,
+            :rolling_5gw_points,
+            :rolling_10gw_points,
+
+            :previous_gw_xg,
+            :rolling_3gw_xg,
+            :rolling_5gw_xg,
+            :rolling_10gw_xg,
+
+            :previous_gw_xa,
+            :rolling_3gw_xa,
+            :rolling_5gw_xa,
+            :rolling_10gw_xa,
+
+            :previous_gw_xgi,
+            :rolling_3gw_xgi,
+            :rolling_5gw_xgi,
+            :rolling_10gw_xgi,
+
+            :previous_gw_minutes,
+            :rolling_3gw_minutes,
+            :rolling_5gw_minutes,
+            :rolling_10gw_minutes,
+
+            :previous_gw_starts,
+            :rolling_3gw_starts,
+            :rolling_5gw_starts,
+            :rolling_10gw_starts,
+
+            :rolling_3gw_start_rate,
+            :rolling_5gw_start_rate,
+            :rolling_10gw_start_rate,
+
+            :next_gw_points
+        )
+        ON CONFLICT (
+            season,
+            gameweek,
+            player_id
+        )
+        DO UPDATE SET
+
+            player_name = EXCLUDED.player_name,
+            position = EXCLUDED.position,
+            team_id = EXCLUDED.team_id,
+            team_name = EXCLUDED.team_name,
+
+            previous_gw_points = EXCLUDED.previous_gw_points,
+            rolling_3gw_points = EXCLUDED.rolling_3gw_points,
+            rolling_5gw_points = EXCLUDED.rolling_5gw_points,
+            rolling_10gw_points = EXCLUDED.rolling_10gw_points,
+
+            previous_gw_xg = EXCLUDED.previous_gw_xg,
+            rolling_3gw_xg = EXCLUDED.rolling_3gw_xg,
+            rolling_5gw_xg = EXCLUDED.rolling_5gw_xg,
+            rolling_10gw_xg = EXCLUDED.rolling_10gw_xg,
+
+            previous_gw_xa = EXCLUDED.previous_gw_xa,
+            rolling_3gw_xa = EXCLUDED.rolling_3gw_xa,
+            rolling_5gw_xa = EXCLUDED.rolling_5gw_xa,
+            rolling_10gw_xa = EXCLUDED.rolling_10gw_xa,
+
+            previous_gw_xgi = EXCLUDED.previous_gw_xgi,
+            rolling_3gw_xgi = EXCLUDED.rolling_3gw_xgi,
+            rolling_5gw_xgi = EXCLUDED.rolling_5gw_xgi,
+            rolling_10gw_xgi = EXCLUDED.rolling_10gw_xgi,
+
+            previous_gw_minutes = EXCLUDED.previous_gw_minutes,
+            rolling_3gw_minutes = EXCLUDED.rolling_3gw_minutes,
+            rolling_5gw_minutes = EXCLUDED.rolling_5gw_minutes,
+            rolling_10gw_minutes = EXCLUDED.rolling_10gw_minutes,
+
+            previous_gw_starts = EXCLUDED.previous_gw_starts,
+            rolling_3gw_starts = EXCLUDED.rolling_3gw_starts,
+            rolling_5gw_starts = EXCLUDED.rolling_5gw_starts,
+            rolling_10gw_starts = EXCLUDED.rolling_10gw_starts,
+
+            rolling_3gw_start_rate = EXCLUDED.rolling_3gw_start_rate,
+            rolling_5gw_start_rate = EXCLUDED.rolling_5gw_start_rate,
+            rolling_10gw_start_rate = EXCLUDED.rolling_10gw_start_rate,
+
+            next_gw_points = EXCLUDED.next_gw_points
+        """
+    )
+
+    data = features.to_dict(
+        orient="records"
+    )
+
+    batch_size = 500
+    total = len(data)
+
+    with conn.session as session:
+
+        for start in range(
+            0,
+            total,
+            batch_size
+        ):
+
+            batch = data[
+                start:start + batch_size
+            ]
+
+            session.execute(
+                sql,
+                batch
+            )
+
+            session.commit()
+
+    return total
