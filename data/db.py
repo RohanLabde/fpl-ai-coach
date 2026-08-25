@@ -419,25 +419,30 @@ def save_prediction_features(features):
         "DEBUG: attempting to open database session",
         flush=True
     )
-    with conn.session as session:
 
-        print(
-            "DEBUG: database session opened",
-            flush=True
-        )
+    with conn.session as session:
+    
+        print("DEBUG: database session opened", flush=True)
+    
+        total_batches = (total + batch_size - 1) // batch_size
+    
         for start in range(
             0,
             total,
             batch_size
         ):
-
+    
+            batch_number = start // batch_size + 1
+    
             batch = data[
                 start:start + batch_size
             ]
     
             print(
-                f"Saving batch {start // batch_size + 1} "
-                f"of {(total + batch_size - 1) // batch_size}"
+                f"DEBUG A: before session.execute "
+                f"batch {batch_number}/{total_batches} "
+                f"({len(batch)} rows)",
+                flush=True
             )
     
             session.execute(
@@ -446,13 +451,22 @@ def save_prediction_features(features):
             )
     
             print(
-                f"Batch {start // batch_size + 1} executed"
+                f"DEBUG B: after session.execute "
+                f"batch {batch_number}/{total_batches}",
+                flush=True
             )
     
             session.commit()
     
             print(
-                f"Batch {start // batch_size + 1} committed"
+                f"DEBUG C: after session.commit "
+                f"batch {batch_number}/{total_batches}",
+                flush=True
             )
-
+    
+        print(
+            "DEBUG: all prediction feature batches completed",
+            flush=True
+        )
+    
     return total
