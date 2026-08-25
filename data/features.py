@@ -122,6 +122,13 @@ def build_form_features(historical):
         .shift(-1)
     )
 
+    print("DEBUG total rows:", len(df))
+    print("DEBUG null targets:", df["next_gw_points"].isna().sum())
+    print(
+        "DEBUG players:",
+        df[["season", "player_id"]].drop_duplicates().shape[0]
+    )
+
     # Remove rows where there is no next gameweek target
     df = df.dropna(
         subset=["next_gw_points"]
