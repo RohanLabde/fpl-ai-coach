@@ -114,9 +114,18 @@ def build_form_features(historical):
         df
     )
     
-    # Actual points in target GW
-    
-    df["next_gw_points"] = df["total_points"]
+    # Points scored in the NEXT gameweek
+
+    df["next_gw_points"] = (
+        df
+        .groupby(["season", "player_id"])["total_points"]
+        .shift(-1)
+    )
+
+    # Remove rows where there is no next gameweek target
+    df = df.dropna(
+        subset=["next_gw_points"]
+    ).copy()
 
     # ---------------------------------------
     # 8. Keep only the fields we currently need
