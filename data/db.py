@@ -412,6 +412,31 @@ def save_prediction_features(features):
         orient="records"
     )
 
+    print(
+        f"DEBUG: total records = {len(data)}",
+        flush=True
+    )
+    
+    keys = [
+        (
+            row["season"],
+            row["gameweek"],
+            row["player_id"]
+        )
+        for row in data
+    ]
+    
+    unique_keys = set(keys)
+    
+    print(
+        f"DEBUG: unique (season, gameweek, player_id) keys = {len(unique_keys)}",
+        flush=True
+    )
+    
+    print(
+        f"DEBUG: duplicate key records = {len(keys) - len(unique_keys)}",
+        flush=True
+    )
     batch_size = 500
     total = len(data)
 
