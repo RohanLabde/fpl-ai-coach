@@ -415,21 +415,34 @@ def save_prediction_features(features):
 
     with conn.session as session:
 
-        for start in range(
-            0,
-            total,
-            batch_size
-        ):
+    for start in range(
+        0,
+        total,
+        batch_size
+    ):
 
-            batch = data[
-                start:start + batch_size
-            ]
+        batch = data[
+            start:start + batch_size
+        ]
 
-            session.execute(
-                sql,
-                batch
-            )
+        print(
+            f"Saving batch {start // batch_size + 1} "
+            f"of {(total + batch_size - 1) // batch_size}"
+        )
 
-            session.commit()
+        session.execute(
+            sql,
+            batch
+        )
+
+        print(
+            f"Batch {start // batch_size + 1} executed"
+        )
+
+        session.commit()
+
+        print(
+            f"Batch {start // batch_size + 1} committed"
+        )
 
     return total
