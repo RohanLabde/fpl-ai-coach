@@ -264,6 +264,8 @@ def save_prediction_features(features):
 
     conn = get_database_connection()
 
+    print("DEBUG: save_prediction_features started", flush=True)
+    print(f"DEBUG: total feature rows = {len(features)}", flush=True)
     sql = text(
         """
         INSERT INTO prediction_features (
@@ -413,8 +415,16 @@ def save_prediction_features(features):
     batch_size = 500
     total = len(data)
 
+    print(
+        "DEBUG: attempting to open database session",
+        flush=True
+    )
     with conn.session as session:
 
+        print(
+            "DEBUG: database session opened",
+            flush=True
+        )
         for start in range(
             0,
             total,
