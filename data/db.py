@@ -415,11 +415,11 @@ def save_prediction_features(features):
 
     with conn.session as session:
 
-    for start in range(
-        0,
-        total,
-        batch_size
-    ):
+        for start in range(
+            0,
+            total,
+            batch_size
+        ):
 
         batch = data[
             start:start + batch_size
