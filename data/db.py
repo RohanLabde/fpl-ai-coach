@@ -421,28 +421,28 @@ def save_prediction_features(features):
             batch_size
         ):
 
-        batch = data[
-            start:start + batch_size
-        ]
-
-        print(
-            f"Saving batch {start // batch_size + 1} "
-            f"of {(total + batch_size - 1) // batch_size}"
-        )
-
-        session.execute(
-            sql,
-            batch
-        )
-
-        print(
-            f"Batch {start // batch_size + 1} executed"
-        )
-
-        session.commit()
-
-        print(
-            f"Batch {start // batch_size + 1} committed"
-        )
+            batch = data[
+                start:start + batch_size
+            ]
+    
+            print(
+                f"Saving batch {start // batch_size + 1} "
+                f"of {(total + batch_size - 1) // batch_size}"
+            )
+    
+            session.execute(
+                sql,
+                batch
+            )
+    
+            print(
+                f"Batch {start // batch_size + 1} executed"
+            )
+    
+            session.commit()
+    
+            print(
+                f"Batch {start // batch_size + 1} committed"
+            )
 
     return total
