@@ -18,7 +18,8 @@ from data.historical import (
 from data.db import (
     get_database_connection,
     save_players,
-    save_historical_data
+    save_historical_data,
+    save_prediction_fixtures    
 )
 
 HISTORICAL_2025_26_URL = (
@@ -380,10 +381,17 @@ if st.button("🧠 Build Form Features"):
             features = build_form_features(
                 historical
             )
-
+        with st.spinner(
+            "Saving prediction features to Supabase..."
+        ):
+        
+            saved = save_prediction_features(
+                features
+            )
 
         st.success(
-            "Form features created successfully!"
+            f"Form features created and "
+            f"{saved:,} rows saved to Supabase!"
         )
 
 
