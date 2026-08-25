@@ -27,7 +27,7 @@ HISTORICAL_2025_26_URL = (
     "2025-26_all_players_gw.csv"
 )
 
-from data.fpl_api import get_fpl_data
+from data.fpl_api import get_fpl_data, get_fixtures
 from data.fpl_data import get_players
 from data.features import build_form_features
 
