@@ -32,8 +32,7 @@ HISTORICAL_2025_26_URL = (
 from data.fpl_api import get_fpl_data, get_fixtures
 from data.fpl_data import get_players
 from data.features import (
-    build_form_features,
-    build_team_gameweek_calendar
+    build_form_features    
 )
 
 
