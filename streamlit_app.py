@@ -22,6 +22,16 @@ from data.db import (
     save_prediction_features
 )
 
+from data.fpl_api import get_fpl_data, get_fixtures
+from data.fpl_data import get_players
+
+from data.features import (
+    build_team_gameweek_calendar,
+    build_player_gameweek_data,
+    build_form_features
+)
+
+
 HISTORICAL_2025_26_URL = (
     "https://raw.githubusercontent.com/"
     "imadeddine-belkat/Premier-League-Stats/"
@@ -29,13 +39,7 @@ HISTORICAL_2025_26_URL = (
     "2025-26_all_players_gw.csv"
 )
 
-from data.fpl_api import get_fpl_data, get_fixtures
-from data.fpl_data import get_players
-from data.features import (
-    build_form_features,
-    build_team_gameweek_calendar,
-    aggregate_player_gameweeks
-)
+HISTORICAL_SEASON = "2025-26"
 
 
 st.set_page_config(
@@ -43,7 +47,6 @@ st.set_page_config(
     page_icon="⚽",
     layout="wide"
 )
-
 
 st.title("⚽ FPL AI Coach")
 
@@ -54,32 +57,19 @@ st.title("⚽ FPL AI Coach")
 
 st.subheader("FPL Data")
 
-
 if st.button("🔄 Update Player Database"):
-
     try:
 
-        with st.spinner(
-            "Downloading latest FPL data..."
-        ):
-
+        with st.spinner("Downloading latest FPL data..."):
             data = get_fpl_data()
 
-        players = get_players(
-            data
-        )
+        players = get_players(data)
 
-        with st.spinner(
-            "Saving players to database..."
-        ):
-
-            save_players(
-                players
-            )
+        with st.spinner("Saving players to database..."):
+            save_players(players)
 
         st.success(
-            f"Successfully updated "
-            f"{len(players)} players!"
+            f"Successfully updated {len(players)} players!"
         )
 
     except Exception as e:
@@ -90,7 +80,7 @@ if st.button("🔄 Update Player Database"):
 
 
 # ============================================================
-# READ DATABASE
+# DATABASE CHECK
 # ============================================================
 
 try:
@@ -165,10 +155,7 @@ if st.button("📚 Test Historical Data"):
 # TEAM MAPPING TEST
 # ============================================================
 
-st.subheader(
-    "Team Mapping Test"
-)
-
+st.subheader("Team Mapping Test")
 
 if st.button("🔎 Test Team Mapping"):
 
@@ -185,8 +172,7 @@ if st.button("🔎 Test Team Mapping"):
         )
 
         st.success(
-            f"Successfully loaded "
-            f"{len(teams)} teams!"
+            f"Successfully loaded {len(teams)} teams!"
         )
 
         st.dataframe(
@@ -205,14 +191,9 @@ if st.button("🔎 Test Team Mapping"):
 # HISTORICAL DATA JOIN TEST
 # ============================================================
 
-st.subheader(
-    "Historical Data Join Test"
-)
+st.subheader("Historical Data Join Test")
 
-
-if st.button(
-    "🔗 Test Player + Fixture Join"
-):
+if st.button("🔗 Test Player + Fixture Join"):
 
     try:
 
@@ -230,7 +211,6 @@ if st.button(
                 team_data
             )
 
-
         with st.spinner(
             "Joining player, fixture and team data..."
         ):
@@ -241,51 +221,35 @@ if st.button(
                 teams
             )
 
-
         st.success(
             "Historical data joined successfully!"
         )
 
-
-        # --------------------------------
-        # Validation metrics
-        # --------------------------------
-
         col1, col2, col3, col4 = st.columns(4)
-
 
         col1.metric(
             "Player rows",
             len(historical)
         )
 
-
         col2.metric(
             "Gameweeks",
             historical["gameweek"].nunique()
         )
-
 
         col3.metric(
             "Fixtures",
             historical["fixture_id"].nunique()
         )
 
-
         col4.metric(
             "Missing fixtures",
             historical["fixture_id"].isna().sum()
         )
 
-
-        # --------------------------------
-        # Preview
-        # --------------------------------
-
         st.subheader(
             "Historical Data Preview"
         )
-
 
         preview_columns = [
             "season",
@@ -307,14 +271,12 @@ if st.button(
             "expected_assists"
         ]
 
-
         st.dataframe(
             historical[
                 preview_columns
             ].head(20),
             use_container_width=True
         )
-
 
     except Exception as e:
 
@@ -324,13 +286,12 @@ if st.button(
 
 
 # ============================================================
-# TEAM × GAMEWEEK CALENDAR VALIDATION
+# TEAM × GAMEWEEK CALENDAR TEST
 # ============================================================
 
 st.subheader(
     "Team × Gameweek Calendar Test"
 )
-
 
 if st.button(
     "📅 Validate Team × Gameweek Calendar"
@@ -339,96 +300,84 @@ if st.button(
     try:
 
         with st.spinner(
-            "Downloading fixture calendar..."
+            "Building Team × Gameweek calendar..."
         ):
 
             players, fixtures = (
                 load_historical_data()
             )
 
-
-        with st.spinner(
-            "Building Team × Gameweek calendar..."
-        ):
-
-            calendar = (
-                build_team_gameweek_calendar(
-                    fixtures
-                )
+            calendar = build_team_gameweek_calendar(
+                fixtures,
+                season=HISTORICAL_SEASON
             )
 
-
         st.success(
-            "Team × Gameweek calendar "
-            "created successfully!"
+            "Team × Gameweek calendar created successfully!"
         )
 
+        calendar_rows = len(calendar)
+        gameweeks = calendar["gameweek"].nunique()
+        teams = calendar["team_id"].nunique()
 
-        # --------------------------------
-        # Summary metrics
-        # --------------------------------
-
-        col1, col2, col3, col4 = st.columns(4)
-
-
-        col1.metric(
-            "Calendar rows",
-            len(calendar)
-        )
-
-
-        col2.metric(
-            "Gameweeks",
-            calendar["gameweek"].nunique()
-        )
-
-
-        col3.metric(
-            "Teams",
-            calendar["team_id"].nunique()
-        )
-
-
-        col4.metric(
-            "BGW team rows",
+        bgw_rows = int(
             (
                 calendar["gameweek_type"] == "BGW"
             ).sum()
         )
 
-
-        # --------------------------------
-        # DGW metric
-        # --------------------------------
-
-        st.metric(
-            "DGW team rows",
+        dgw_rows = int(
             (
                 calendar["gameweek_type"] == "DGW"
             ).sum()
         )
 
+        col1, col2, col3, col4, col5 = st.columns(5)
 
-        # --------------------------------
-        # Gameweek summary
-        # --------------------------------
+        col1.metric(
+            "Calendar rows",
+            calendar_rows
+        )
+
+        col2.metric(
+            "Gameweeks",
+            gameweeks
+        )
+
+        col3.metric(
+            "Teams",
+            teams
+        )
+
+        col4.metric(
+            "BGW team rows",
+            bgw_rows
+        )
+
+        col5.metric(
+            "DGW team rows",
+            dgw_rows
+        )
 
         st.subheader(
             "Gameweek Summary"
         )
 
-
-        gameweek_summary = (
+        summary = (
             calendar
             .groupby(
                 [
+                    "season",
                     "gameweek",
                     "gameweek_type"
-                ]
+                ],
+                as_index=False
             )
-            .size()
-            .reset_index(
-                name="team_count"
+            .agg(
+                team_count=(
+                    "team_id",
+                    "nunique"
+                )
             )
             .sort_values(
                 [
@@ -438,101 +387,43 @@ if st.button(
             )
         )
 
-
         st.dataframe(
-            gameweek_summary,
+            summary,
             use_container_width=True
         )
-
-
-        # --------------------------------
-        # BGW team rows
-        # --------------------------------
 
         st.subheader(
-            "Blank Gameweek Team Rows"
+            "Calendar Preview"
         )
-
-
-        bgw_rows = calendar[
-            calendar["gameweek_type"] == "BGW"
-        ]
-
 
         st.dataframe(
-            bgw_rows,
+            calendar.head(50),
             use_container_width=True
         )
-
-
-        # --------------------------------
-        # DGW team rows
-        # --------------------------------
-
-        st.subheader(
-            "Double Gameweek Team Rows"
-        )
-
-
-        dgw_rows = calendar[
-            calendar["gameweek_type"] == "DGW"
-        ]
-
-
-        st.dataframe(
-            dgw_rows,
-            use_container_width=True
-        )
-
-
-        # --------------------------------
-        # Calendar validation
-        # --------------------------------
-
-        duplicate_count = (
-            calendar
-            .duplicated(
-                subset=[
-                    "gameweek",
-                    "team_id"
-                ]
-            )
-            .sum()
-        )
-
-
-        if duplicate_count == 0:
-
-            st.success(
-                "Calendar validation passed: "
-                "no duplicate Team × Gameweek keys."
-            )
-
-        else:
-
-            st.error(
-                "Calendar validation failed: "
-                f"{duplicate_count} duplicate "
-                "Team × Gameweek keys found."
-            )
-
 
     except Exception as e:
 
         st.error(
-            f"Team × Gameweek calendar "
-            f"validation failed: {e}"
+            f"Team × Gameweek calendar validation failed: {e}"
         )
 
-st.subheader("Player × Gameweek Canonicalization Test")
 
+# ============================================================
+# PLAYER × GAMEWEEK CANONICALIZATION TEST
+# ============================================================
 
-if st.button("🧩 Test Player × Gameweek Canonicalization"):
+st.subheader(
+    "Player × Gameweek Canonicalization Test"
+)
+
+if st.button(
+    "🧩 Test Player × Gameweek Canonicalization"
+):
 
     try:
 
         with st.spinner(
-            "Preparing historical player data..."
+            "Preparing historical data and calendar..."
         ):
 
             players, fixtures = (
@@ -551,37 +442,68 @@ if st.button("🧩 Test Player × Gameweek Canonicalization"):
                 teams
             )
 
-
-        with st.spinner(
-            "Building Team × Gameweek calendar..."
-        ):
-
             calendar = build_team_gameweek_calendar(
-                fixtures
+                fixtures,
+                season=HISTORICAL_SEASON
             )
-
 
         with st.spinner(
-            "Aggregating player gameweeks..."
+            "Building canonical Player × Gameweek dataset..."
         ):
 
-            player_gameweeks = (
-                aggregate_player_gameweeks(
-                    historical
-                )
+            canonical = build_player_gameweek_data(
+                historical,
+                calendar
             )
 
-
-        # --------------------------------
-        # Validation
-        # --------------------------------
-
-        total_rows = len(
-            player_gameweeks
+        duplicate_count = int(
+            canonical
+            .duplicated(
+                subset=[
+                    "season",
+                    "gameweek",
+                    "player_id"
+                ]
+            )
+            .sum()
         )
 
-        unique_keys = (
-            player_gameweeks[
+        dgw_player_rows = int(
+            canonical[
+                "is_double_gameweek"
+            ].sum()
+        )
+
+        bgw_player_rows = int(
+            canonical[
+                "is_blank_gameweek"
+            ].sum()
+        )
+
+        if duplicate_count > 0:
+
+            st.error(
+                "Player × Gameweek canonicalization "
+                f"failed: {duplicate_count} duplicate keys."
+            )
+
+        else:
+
+            st.success(
+                "Player × Gameweek aggregation "
+                "passed successfully!"
+            )
+
+        col1, col2, col3, col4 = st.columns(4)
+
+        col1.metric(
+            "Player × GW rows",
+            len(canonical)
+        )
+
+        col2.metric(
+            "Unique Player × GW",
+            canonical[
                 [
                     "season",
                     "gameweek",
@@ -592,178 +514,51 @@ if st.button("🧩 Test Player × Gameweek Canonicalization"):
             .shape[0]
         )
 
-        duplicate_keys = (
-            total_rows -
-            unique_keys
-        )
-
-
-        # --------------------------------
-        # DGW validation
-        # --------------------------------
-
-        dgw_player_rows = (
-            player_gameweeks[
-                player_gameweeks[
-                    "fixture_count"
-                ] > 1
-            ]
-        )
-
-
-        # --------------------------------
-        # Calendar join
-        # --------------------------------
-
-        calendar_player = (
-            player_gameweeks.merge(
-                calendar[
-                    [
-                        "gameweek",
-                        "team_id",
-                        "fixture_count",
-                        "gameweek_type"
-                    ]
-                ],
-                on=[
-                    "gameweek",
-                    "team_id"
-                ],
-                how="left",
-                suffixes=(
-                    "_player",
-                    "_calendar"
-                )
-            )
-        )
-
-
-        # --------------------------------
-        # Check fixture-count agreement
-        # --------------------------------
-
-        fixture_count_mismatches = (
-            calendar_player[
-                "fixture_count_player"
-            ]
-            !=
-            calendar_player[
-                "fixture_count_calendar"
-            ]
-        ).sum()
-
-
-        # --------------------------------
-        # Results
-        # --------------------------------
-
-        if duplicate_keys > 0:
-
-            st.error(
-                "Player × Gameweek "
-                "canonicalization failed: "
-                f"{duplicate_keys} duplicate keys found."
-            )
-
-        elif fixture_count_mismatches > 0:
-
-            st.error(
-                "Player × Gameweek "
-                "canonicalization failed: "
-                f"{fixture_count_mismatches} "
-                "fixture-count mismatches."
-            )
-
-        else:
-
-            st.success(
-                "Player × Gameweek aggregation "
-                "passed successfully!"
-            )
-
-
-        # --------------------------------
-        # Metrics
-        # --------------------------------
-
-        col1, col2, col3, col4 = (
-            st.columns(4)
-        )
-
-
-        col1.metric(
-            "Player × GW rows",
-            total_rows
-        )
-
-
-        col2.metric(
-            "Unique Player × GW",
-            unique_keys
-        )
-
-
         col3.metric(
-            "DGW Player rows",
-            len(dgw_player_rows)
+            "BGW Player rows",
+            bgw_player_rows
         )
-
 
         col4.metric(
-            "Duplicate keys",
-            duplicate_keys
+            "DGW Player rows",
+            dgw_player_rows
         )
-
-
-        # --------------------------------
-        # DGW summary
-        # --------------------------------
 
         st.subheader(
             "Double Gameweek Summary"
         )
 
-
         dgw_summary = (
-            player_gameweeks[
-                player_gameweeks[
-                    "fixture_count"
-                ] > 1
+            canonical[
+                canonical["is_double_gameweek"]
             ]
             .groupby(
-                "gameweek"
+                "gameweek",
+                as_index=False
             )
             .agg(
                 player_rows=(
                     "player_id",
-                    "count"
+                    "size"
                 ),
                 players=(
                     "player_id",
                     "nunique"
                 )
             )
-            .reset_index()
             .sort_values(
                 "gameweek"
             )
         )
-
 
         st.dataframe(
             dgw_summary,
             use_container_width=True
         )
 
-
-        # --------------------------------
-        # Preview
-        # --------------------------------
-
         st.subheader(
             "Player × Gameweek Preview"
         )
-
 
         preview_columns = [
             "season",
@@ -778,37 +573,31 @@ if st.button("🧩 Test Player × Gameweek Canonicalization"):
             "total_points",
             "expected_goals",
             "expected_assists",
-            "expected_goal_involvements"
+            "expected_goal_involvements",
+            "is_blank_gameweek",
+            "is_double_gameweek"
         ]
 
-
         st.dataframe(
-            player_gameweeks[
+            canonical[
                 preview_columns
             ].head(30),
             use_container_width=True
         )
 
-
-        # --------------------------------
-        # Important note
-        # --------------------------------
-
         st.info(
-            "This test currently validates "
-            "fixture-level → Player × Gameweek "
-            "aggregation. BGW rows are not yet "
-            "being created. That is the next "
-            "implementation step."
+            "This test validates the canonical Player × "
+            "Gameweek layer. BGW rows are explicitly present "
+            "with fixture_count = 0, while ordinary non-playing "
+            "rows retain the distinction that a fixture existed."
         )
-
 
     except Exception as e:
 
         st.error(
-            "Player × Gameweek "
-            f"canonicalization failed: {e}"
+            f"Player × Gameweek canonicalization failed: {e}"
         )
+
 
 # ============================================================
 # HISTORICAL DATABASE IMPORT
@@ -817,7 +606,6 @@ if st.button("🧩 Test Player × Gameweek Canonicalization"):
 st.subheader(
     "Historical Database Import"
 )
-
 
 if st.button(
     "💾 Import 2025/26 into Supabase"
@@ -839,7 +627,6 @@ if st.button(
                 team_data
             )
 
-
         with st.spinner(
             "Preparing historical records..."
         ):
@@ -858,12 +645,9 @@ if st.button(
                 )
             )
 
-
         st.info(
-            f"Ready to import "
-            f"{len(records):,} records."
+            f"Ready to import {len(records):,} records."
         )
-
 
         with st.spinner(
             "Importing records into Supabase..."
@@ -873,12 +657,10 @@ if st.button(
                 records
             )
 
-
         st.success(
             f"Successfully imported "
             f"{imported:,} historical records!"
         )
-
 
     except Exception as e:
 
@@ -894,7 +676,6 @@ if st.button(
 st.subheader(
     "Prediction Feature Test"
 )
-
 
 if st.button(
     "🧠 Build Form Features"
@@ -916,7 +697,6 @@ if st.button(
                 team_data
             )
 
-
             historical = (
                 prepare_historical_data(
                     players,
@@ -925,15 +705,23 @@ if st.button(
                 )
             )
 
+        with st.spinner(
+            "Building Team × Gameweek calendar..."
+        ):
+
+            calendar = build_team_gameweek_calendar(
+                fixtures,
+                season=HISTORICAL_SEASON
+            )
 
         with st.spinner(
             "Calculating form features..."
         ):
 
             features = build_form_features(
-                historical
+                historical,
+                calendar
             )
-
 
         with st.spinner(
             "Saving prediction features to Supabase..."
@@ -943,86 +731,68 @@ if st.button(
                 features
             )
 
-
         st.success(
             f"Form features created and "
             f"{saved:,} rows saved to Supabase!"
         )
 
-
-        # --------------------------------
-        # Basic metrics
-        # --------------------------------
-
         col1, col2, col3 = st.columns(3)
-
 
         col1.metric(
             "Feature rows",
             len(features)
         )
 
-
         col2.metric(
             "Players",
             features["player_id"].nunique()
         )
-
 
         col3.metric(
             "Gameweeks",
             features["gameweek"].nunique()
         )
 
-
-        # --------------------------------
-        # Preview
-        # --------------------------------
-
         st.subheader(
             "Prediction Feature Preview"
         )
 
+        feature_preview_columns = [
+            "gameweek",
+            "player_name",
+            "team_name",
+
+            # Form
+            "rolling_3gw_points",
+            "rolling_5gw_points",
+
+            # Underlying performance
+            "rolling_3gw_xg",
+            "rolling_3gw_xa",
+            "rolling_3gw_xgi",
+
+            # Playing time
+            "previous_gw_minutes",
+            "rolling_3gw_minutes",
+            "rolling_5gw_minutes",
+
+            "previous_gw_starts",
+            "rolling_3gw_starts",
+            "rolling_5gw_starts",
+
+            "rolling_3gw_start_rate",
+            "rolling_5gw_start_rate",
+
+            # Target
+            "next_gw_points"
+        ]
 
         st.dataframe(
             features[
-                [
-                    "gameweek",
-                    "player_name",
-                    "team_name",
-
-                    # Form
-
-                    "rolling_3gw_points",
-                    "rolling_5gw_points",
-
-                    # Underlying performance
-
-                    "rolling_3gw_xg",
-                    "rolling_3gw_xa",
-                    "rolling_3gw_xgi",
-
-                    # Playing time
-
-                    "previous_gw_minutes",
-                    "rolling_3gw_minutes",
-                    "rolling_5gw_minutes",
-
-                    "previous_gw_starts",
-                    "rolling_3gw_starts",
-                    "rolling_5gw_starts",
-
-                    "rolling_3gw_start_rate",
-                    "rolling_5gw_start_rate",
-
-                    # Target
-
-                    "next_gw_points"
-                ]
+                feature_preview_columns
             ].head(30),
             use_container_width=True
         )
-
 
     except Exception as e:
 
@@ -1037,64 +807,58 @@ if st.button(
 
 st.divider()
 
-
 st.header(
     "Fixture Horizon Test"
 )
-
 
 if st.button(
     "🔮 Test Arsenal Fixture Horizon"
 ):
 
-    test_team_id = 1
+    try:
 
-    test_current_gameweek = 10
+        test_team_id = 1
+        test_current_gameweek = 10
 
+        fixtures = pd.DataFrame(
+            get_fixtures()
+        )
 
-    fixtures = pd.DataFrame(
-        get_fixtures()
-    )
-
-
-    fixture_horizon = (
-        get_team_fixture_horizon(
+        fixture_horizon = get_team_fixture_horizon(
             fixtures,
             team_id=test_team_id,
             current_gameweek=test_current_gameweek,
             horizon=5
         )
-    )
 
+        st.subheader(
+            "Arsenal — Next 5 Gameweeks"
+        )
 
-    st.subheader(
-        "Arsenal — Next 5 Gameweeks"
-    )
+        st.dataframe(
+            fixture_horizon,
+            use_container_width=True
+        )
 
-
-    st.dataframe(
-        fixture_horizon,
-        use_container_width=True
-    )
-
-
-    summary = (
-        summarize_fixture_horizon(
+        summary = summarize_fixture_horizon(
             fixtures,
             team_id=test_team_id,
             current_gameweek=test_current_gameweek
         )
-    )
 
+        st.subheader(
+            "Fixture Summary"
+        )
 
-    st.subheader(
-        "Fixture Summary"
-    )
+        st.json(
+            summary
+        )
 
+    except Exception as e:
 
-    st.json(
-        summary
-    )
+        st.error(
+            f"Fixture horizon test failed: {e}"
+        )
 
 
 # ============================================================
@@ -1105,34 +869,35 @@ st.header(
     "Fixture Feature Test"
 )
 
-
 if st.button(
     "🧪 Build Fixture Features"
 ):
 
-    fixtures = pd.DataFrame(
-        get_fixtures()
-    )
+    try:
 
+        fixtures = pd.DataFrame(
+            get_fixtures()
+        )
 
-    fixture_features = (
-        build_fixture_features(
+        fixture_features = build_fixture_features(
             fixtures
         )
-    )
 
+        st.success(
+            "Fixture features created successfully!"
+        )
 
-    st.success(
-        "Fixture features created successfully!"
-    )
+        st.write(
+            f"Rows: {len(fixture_features)}"
+        )
 
+        st.dataframe(
+            fixture_features.head(20),
+            use_container_width=True
+        )
 
-    st.write(
-        f"Rows: {len(fixture_features)}"
-    )
+    except Exception as e:
 
-
-    st.dataframe(
-        fixture_features.head(20),
-        use_container_width=True
-    )
+        st.error(
+            f"Fixture feature engineering failed: {e}"
+        )
