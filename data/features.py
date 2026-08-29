@@ -1,874 +1,337 @@
 import pandas as pd
 
-
-def build_team_gameweek_calendar(fixtures):
+def build_team_gameweek_calendar(fixtures, season=None):
     """
     Build the complete Team × Gameweek fixture calendar.
 
-    This is the authoritative source for determining whether
-    a team has:
+    The calendar is the authoritative source for whether a team has:
+        0 fixtures -> BGW
+        1 fixture  -> normal gameweek
+        2+ fixtures -> DGW/multiple gameweek
 
-        0 fixtures = Blank Gameweek (BGW)
-        1 fixture  = Normal Gameweek
-        2+ fixtures = Double/Multiple Gameweek
-
-    IMPORTANT:
-    This function only builds and validates the calendar.
-
-    It does NOT modify player performance data.
+    If ``season`` is supplied, it is attached to every calendar row. If the
+    input fixtures already contains a ``season`` column, that column is used.
     """
-
     fixtures = fixtures.copy()
 
-    # ---------------------------------------
-    # 1. Validate required columns
-    # ---------------------------------------
-
-    required_columns = [
-        "event",
-        "team_h",
-        "team_a"
-    ]
-
-    missing_columns = [
-        column
-        for column in required_columns
-        if column not in fixtures.columns
-    ]
-
+    required_columns = ["event", "team_h", "team_a"]
+    missing_columns = [c for c in required_columns if c not in fixtures.columns]
     if missing_columns:
-
         raise ValueError(
-            "Missing columns required to build "
-            f"team-gameweek calendar: {missing_columns}"
+            "Missing columns required to build team-gameweek calendar: "
+            f"{missing_columns}"
         )
 
-    # ---------------------------------------
-    # 2. Keep fixtures with a valid gameweek
-    # ---------------------------------------
+    if season is not None:
+        fixtures["season"] = season
+    elif "season" not in fixtures.columns:
+        # A season is optional at this layer. build_player_gameweek_data()
+        # will safely attach it when historical data contains one season.
+        pass
 
-    fixtures = fixtures[
-        fixtures["event"].notna()
-    ].copy()
+    fixtures = fixtures[fixtures["event"].notna()].copy()
 
-    # ---------------------------------------
-    # 3. Convert identifiers to numeric
-    # ---------------------------------------
-
-    fixtures["gameweek"] = pd.to_numeric(
-        fixtures["event"],
-        errors="coerce"
-    )
-
-    fixtures["home_team_id"] = pd.to_numeric(
-        fixtures["team_h"],
-        errors="coerce"
-    )
-
-    fixtures["away_team_id"] = pd.to_numeric(
-        fixtures["team_a"],
-        errors="coerce"
-    )
+    fixtures["gameweek"] = pd.to_numeric(fixtures["event"], errors="coerce")
+    fixtures["home_team_id"] = pd.to_numeric(fixtures["team_h"], errors="coerce")
+    fixtures["away_team_id"] = pd.to_numeric(fixtures["team_a"], errors="coerce")
 
     fixtures = fixtures.dropna(
-        subset=[
-            "gameweek",
-            "home_team_id",
-            "away_team_id"
-        ]
+        subset=["gameweek", "home_team_id", "away_team_id"]
     ).copy()
 
-    fixtures["gameweek"] = (
-        fixtures["gameweek"]
-        .astype(int)
+    fixtures["gameweek"] = fixtures["gameweek"].astype(int)
+    fixtures["home_team_id"] = fixtures["home_team_id"].astype(int)
+    fixtures["away_team_id"] = fixtures["away_team_id"].astype(int)
+
+    home = fixtures[["gameweek", "home_team_id"]].rename(
+        columns={"home_team_id": "team_id"}
+    )
+    away = fixtures[["gameweek", "away_team_id"]].rename(
+        columns={"away_team_id": "team_id"}
     )
 
-    fixtures["home_team_id"] = (
-        fixtures["home_team_id"]
-        .astype(int)
-    )
+    if "season" in fixtures.columns:
+        home["season"] = fixtures["season"].values
+        away["season"] = fixtures["season"].values
+        team_fixtures = pd.concat([home, away], ignore_index=True)
 
-    fixtures["away_team_id"] = (
-        fixtures["away_team_id"]
-        .astype(int)
-    )
-
-    # ---------------------------------------
-    # 4. Create one row for every
-    #    team participating in a fixture
-    #
-    # Home fixture:
-    #
-    # GW | Team
-    #
-    # Away fixture:
-    #
-    # GW | Team
-    # ---------------------------------------
-
-    home_fixtures = fixtures[
-        [
-            "gameweek",
-            "home_team_id"
-        ]
-    ].rename(
-        columns={
-            "home_team_id": "team_id"
-        }
-    )
-
-    away_fixtures = fixtures[
-        [
-            "gameweek",
-            "away_team_id"
-        ]
-    ].rename(
-        columns={
-            "away_team_id": "team_id"
-        }
-    )
-
-    team_fixtures = pd.concat(
-        [
-            home_fixtures,
-            away_fixtures
-        ],
-        ignore_index=True
-    )
-
-    # ---------------------------------------
-    # 5. Count fixtures per team per GW
-    # ---------------------------------------
-
-    fixture_counts = (
-        team_fixtures
-        .groupby(
-            [
-                "gameweek",
-                "team_id"
-            ],
-            as_index=False
+        fixture_counts = (
+            team_fixtures
+            .groupby(["season", "gameweek", "team_id"], as_index=False)
+            .size()
+            .rename(columns={"size": "fixture_count"})
         )
-        .size()
-        .rename(
-            columns={
-                "size": "fixture_count"
-            }
+
+        seasons = sorted(fixture_counts["season"].dropna().unique())
+        grid_parts = []
+        for current_season in seasons:
+            s = fixture_counts[fixture_counts["season"] == current_season]
+            gameweeks = sorted(s["gameweek"].unique())
+            teams = sorted(s["team_id"].unique())
+            grid = pd.MultiIndex.from_product(
+                [gameweeks, teams], names=["gameweek", "team_id"]
+            ).to_frame(index=False)
+            grid["season"] = current_season
+            grid_parts.append(grid)
+        complete_calendar = pd.concat(grid_parts, ignore_index=True)
+
+        calendar = complete_calendar.merge(
+            fixture_counts, on=["season", "gameweek", "team_id"], how="left"
         )
-    )
-
-    # ---------------------------------------
-    # 6. Build complete Team × Gameweek grid
-    #
-    # This is important.
-    #
-    # groupby() alone cannot show BGWs because
-    # a team with zero fixtures does not appear.
-    #
-    # The complete grid explicitly creates those
-    # combinations.
-    # ---------------------------------------
-
-    all_gameweeks = sorted(
-        fixtures["gameweek"]
-        .unique()
-    )
-
-    all_teams = sorted(
-        pd.concat(
-            [
-                fixtures["home_team_id"],
-                fixtures["away_team_id"]
-            ],
-            ignore_index=True
+        sort_columns = ["season", "gameweek", "team_id"]
+        key_columns = ["season", "gameweek", "team_id"]
+        expected_rows = sum(
+            len(fixture_counts[fixture_counts["season"] == s]["gameweek"].unique())
+            * len(fixture_counts[fixture_counts["season"] == s]["team_id"].unique())
+            for s in seasons
         )
-        .unique()
-    )
-
-    complete_calendar = (
-        pd.MultiIndex
-        .from_product(
-            [
-                all_gameweeks,
-                all_teams
-            ],
-            names=[
-                "gameweek",
-                "team_id"
-            ]
+    else:
+        team_fixtures = pd.concat([home, away], ignore_index=True)
+        fixture_counts = (
+            team_fixtures
+            .groupby(["gameweek", "team_id"], as_index=False)
+            .size()
+            .rename(columns={"size": "fixture_count"})
         )
-        .to_frame(
-            index=False
+
+        gameweeks = sorted(fixture_counts["gameweek"].unique())
+        teams = sorted(fixture_counts["team_id"].unique())
+        complete_calendar = pd.MultiIndex.from_product(
+            [gameweeks, teams], names=["gameweek", "team_id"]
+        ).to_frame(index=False)
+
+        calendar = complete_calendar.merge(
+            fixture_counts, on=["gameweek", "team_id"], how="left"
         )
-    )
+        sort_columns = ["gameweek", "team_id"]
+        key_columns = ["gameweek", "team_id"]
+        expected_rows = len(gameweeks) * len(teams)
 
-    # ---------------------------------------
-    # 7. Join actual fixture counts
-    # ---------------------------------------
-
-    calendar = complete_calendar.merge(
-        fixture_counts,
-        on=[
-            "gameweek",
-            "team_id"
-        ],
-        how="left"
-    )
-
-    # No fixture = zero fixtures
-
-    calendar["fixture_count"] = (
-        calendar["fixture_count"]
-        .fillna(0)
-        .astype(int)
-    )
-
-    # ---------------------------------------
-    # 8. Create fixture-status flag
-    # ---------------------------------------
-
-    calendar["has_fixture"] = (
-        calendar["fixture_count"] > 0
-    )
-
-    # ---------------------------------------
-    # 9. Classify gameweek type
-    # ---------------------------------------
-
+    calendar["fixture_count"] = calendar["fixture_count"].fillna(0).astype(int)
+    calendar["has_fixture"] = calendar["fixture_count"] > 0
     calendar["gameweek_type"] = "BGW"
+    calendar.loc[calendar["fixture_count"] == 1, "gameweek_type"] = "NORMAL"
+    calendar.loc[calendar["fixture_count"] >= 2, "gameweek_type"] = "DGW"
+    calendar = calendar.sort_values(sort_columns).reset_index(drop=True)
 
-    calendar.loc[
-        calendar["fixture_count"] == 1,
-        "gameweek_type"
-    ] = "NORMAL"
-
-    calendar.loc[
-        calendar["fixture_count"] >= 2,
-        "gameweek_type"
-    ] = "DGW"
-
-    # ---------------------------------------
-    # 10. Sort
-    # ---------------------------------------
-
-    calendar = calendar.sort_values(
-        [
-            "gameweek",
-            "team_id"
-        ]
-    ).reset_index(
-        drop=True
-    )
-
-    # ---------------------------------------
-    # 11. Validation
-    # ---------------------------------------
-
-    expected_rows = (
-        len(all_gameweeks)
-        * len(all_teams)
-    )
-
-    actual_rows = len(calendar)
-
-    if actual_rows != expected_rows:
-
+    if len(calendar) != expected_rows:
         raise ValueError(
-            "Team-gameweek calendar has an "
-            "unexpected number of rows. "
-            f"Expected {expected_rows}, "
-            f"got {actual_rows}."
+            "Team-gameweek calendar has an unexpected number of rows. "
+            f"Expected {expected_rows}, got {len(calendar)}."
         )
 
-    duplicate_count = (
-        calendar
-        .duplicated(
-            subset=[
-                "gameweek",
-                "team_id"
-            ]
-        )
-        .sum()
-    )
-
-    if duplicate_count > 0:
-
+    duplicate_count = int(calendar.duplicated(subset=key_columns).sum())
+    if duplicate_count:
         raise ValueError(
             "Team-gameweek calendar contains "
             f"{duplicate_count} duplicate keys."
         )
 
-    # ---------------------------------------
-    # 12. Debug output
-    # ---------------------------------------
-
-    print(
-        "DEBUG calendar gameweeks:",
-        len(all_gameweeks)
-    )
-
-    print(
-        "DEBUG calendar teams:",
-        len(all_teams)
-    )
-
-    print(
-        "DEBUG calendar rows:",
-        len(calendar)
-    )
-
-    print(
-        "DEBUG normal team-gameweeks:",
-        (
-            calendar["gameweek_type"] == "NORMAL"
-        ).sum()
-    )
-
-    print(
-        "DEBUG double-gameweek team rows:",
-        (
-            calendar["gameweek_type"] == "DGW"
-        ).sum()
-    )
-
-    print(
-        "DEBUG blank-gameweek team rows:",
-        (
-            calendar["gameweek_type"] == "BGW"
-        ).sum()
-    )
+    print("DEBUG calendar rows:", len(calendar), flush=True)
+    print("DEBUG normal team-gameweeks:", int((calendar["gameweek_type"] == "NORMAL").sum()), flush=True)
+    print("DEBUG double-gameweek team rows:", int((calendar["gameweek_type"] == "DGW").sum()), flush=True)
+    print("DEBUG blank-gameweek team rows:", int((calendar["gameweek_type"] == "BGW").sum()), flush=True)
 
     return calendar
 
-def build_player_gameweek_data(
-    historical,
-    team_gameweek_calendar
-):
+
+def build_player_gameweek_data(historical, team_gameweek_calendar):
     """
-    Convert fixture-level player data into one canonical row
-    per player per gameweek.
+    Convert fixture-level player data into exactly one canonical row per
+    season × player × gameweek, including player rows for BGWs.
 
-    Rules:
-
-    NORMAL GW
-        fixture_count = 1
-
-    DGW
-        fixture_count = 2
-        Multiple fixture rows are aggregated.
-
-    BGW
-        fixture_count = 0
-        No fixture-level performance exists, so performance
-        fields remain NULL.
-
-    IMPORTANT:
-        This function creates one row per PLAYER × GAMEWEEK,
-        not one row per fixture.
+    BGW performance columns deliberately remain NULL in the canonical layer.
+    Feature calculations later interpret those NULLs as zero performance,
+    while the explicit BGW flags preserve the distinction from a normal GW in
+    which a player simply did not play.
     """
-
     df = historical.copy()
-
     calendar = team_gameweek_calendar.copy()
 
-    # --------------------------------------------------
-    # 1. Required columns
-    # --------------------------------------------------
-
     required_historical_columns = [
-        "season",
-        "gameweek",
-        "player_id",
-        "player_name",
-        "position",
-        "team_id",
-        "team_name",
-        "minutes",
-        "starts",
-        "total_points",
-        "expected_goals",
-        "expected_assists",
-        "expected_goal_involvements",
+        "season", "gameweek", "player_id", "player_name", "position",
+        "team_id", "team_name", "minutes", "starts", "total_points",
+        "expected_goals", "expected_assists", "expected_goal_involvements"
     ]
+    missing = [c for c in required_historical_columns if c not in df.columns]
+    if missing:
+        raise ValueError("Historical data is missing required columns: " + ", ".join(missing))
 
-    missing_columns = [
-        column
-        for column in required_historical_columns
-        if column not in df.columns
-    ]
+    required_calendar_columns = ["gameweek", "team_id", "fixture_count", "gameweek_type"]
+    missing = [c for c in required_calendar_columns if c not in calendar.columns]
+    if missing:
+        raise ValueError("Team × Gameweek calendar is missing required columns: " + ", ".join(missing))
 
-    if missing_columns:
-        raise ValueError(
-            "Historical data is missing required columns: "
-            + ", ".join(missing_columns)
-        )
-
-    required_calendar_columns = [
-        "season",
-        "gameweek",
-        "team_id",
-        "fixture_count",
-        "gameweek_type",
-    ]
-
-    missing_calendar_columns = [
-        column
-        for column in required_calendar_columns
-        if column not in calendar.columns
-    ]
-
-    if missing_calendar_columns:
-        raise ValueError(
-            "Team × Gameweek calendar is missing required columns: "
-            + ", ".join(missing_calendar_columns)
-        )
-
-    # --------------------------------------------------
-    # 2. Make sure the numeric fields are numeric
-    # --------------------------------------------------
+    # A single-season calendar produced by the existing Streamlit test does
+    # not need to carry season. Multi-season data does.
+    historical_seasons = df["season"].dropna().unique()
+    if "season" not in calendar.columns:
+        if len(historical_seasons) != 1:
+            raise ValueError(
+                "Team × Gameweek calendar has no season column, but historical "
+                "data contains multiple seasons. Build a season-aware calendar."
+            )
+        calendar["season"] = historical_seasons[0]
 
     numeric_columns = [
-        "gameweek",
-        "player_id",
-        "team_id",
-        "minutes",
-        "starts",
-        "total_points",
-        "expected_goals",
-        "expected_assists",
-        "expected_goal_involvements",
+        "gameweek", "player_id", "team_id", "minutes", "starts",
+        "total_points", "expected_goals", "expected_assists",
+        "expected_goal_involvements"
     ]
+    for c in numeric_columns:
+        df[c] = pd.to_numeric(df[c], errors="coerce")
+    for c in ["gameweek", "team_id", "fixture_count"]:
+        calendar[c] = pd.to_numeric(calendar[c], errors="coerce")
 
-    for column in numeric_columns:
+    df = df.dropna(subset=["season", "gameweek", "player_id", "team_id"]).copy()
+    calendar = calendar.dropna(subset=["season", "gameweek", "team_id"]).copy()
+    df["gameweek"] = df["gameweek"].astype(int)
+    df["player_id"] = df["player_id"].astype(int)
+    df["team_id"] = df["team_id"].astype(int)
+    calendar["gameweek"] = calendar["gameweek"].astype(int)
+    calendar["team_id"] = calendar["team_id"].astype(int)
+    calendar["fixture_count"] = calendar["fixture_count"].astype(int)
 
-        df[column] = pd.to_numeric(
-            df[column],
-            errors="coerce"
-        )
-
-    calendar["gameweek"] = pd.to_numeric(
-        calendar["gameweek"],
-        errors="coerce"
-    )
-
-    calendar["team_id"] = pd.to_numeric(
-        calendar["team_id"],
-        errors="coerce"
-    )
-
-    calendar["fixture_count"] = pd.to_numeric(
-        calendar["fixture_count"],
-        errors="coerce"
-    )
-
-    # --------------------------------------------------
-    # 3. Aggregate fixture-level rows
-    #
-    # DGW example:
-    #
-    # GW33 Fixture 1 → 6 points
-    # GW33 Fixture 2 → 8 points
-    #
-    # becomes:
-    #
-    # GW33 → 14 points
-    # --------------------------------------------------
-
+    # Aggregate fixture-level performance to player × GW × team. This is the
+    # correct grain for DGWs and also lets us detect the rare transfer-within-
+    # GW case instead of silently producing duplicate player-GW rows.
     aggregation = {
-        "minutes": "sum",
-        "starts": "sum",
-        "total_points": "sum",
-        "expected_goals": "sum",
-        "expected_assists": "sum",
-        "expected_goal_involvements": "sum",
+        "minutes": "sum", "starts": "sum", "total_points": "sum",
+        "expected_goals": "sum", "expected_assists": "sum",
+        "expected_goal_involvements": "sum"
     }
-
     grouped = (
-        df
-        .groupby(
-            [
-                "season",
-                "gameweek",
-                "player_id",
-                "team_id",
-            ],
-            as_index=False
-        )
+        df.groupby(["season", "gameweek", "player_id", "team_id"], as_index=False)
         .agg(aggregation)
     )
 
-    # --------------------------------------------------
-    # 4. Recover player metadata
-    # --------------------------------------------------
-
     metadata = (
-        df[
-            [
-                "season",
-                "gameweek",
-                "player_id",
-                "team_id",
-                "player_name",
-                "position",
-                "team_name",
-            ]
-        ]
-        .drop_duplicates(
-            subset=[
-                "season",
-                "gameweek",
-                "player_id",
-                "team_id",
-            ]
+        df[["season", "gameweek", "player_id", "team_id", "player_name", "position", "team_name"]]
+        .drop_duplicates(subset=["season", "gameweek", "player_id", "team_id"])
+    )
+    grouped = grouped.merge(
+        metadata, on=["season", "gameweek", "player_id", "team_id"], how="left"
+    )
+
+    team_count_per_player_gw = (
+        grouped.groupby(["season", "gameweek", "player_id"])["team_id"].nunique()
+    )
+    transfer_within_gw = team_count_per_player_gw[team_count_per_player_gw > 1]
+    if len(transfer_within_gw):
+        examples = list(transfer_within_gw.index[:5])
+        raise ValueError(
+            "A player appears for multiple teams in the same gameweek. "
+            "This requires an explicit transfer-within-GW rule before feature "
+            f"engineering. Example keys: {examples}"
         )
-    )
 
+    # Attach calendar to observed player rows.
     grouped = grouped.merge(
-        metadata,
-        on=[
-            "season",
-            "gameweek",
-            "player_id",
-            "team_id",
-        ],
-        how="left"
+        calendar[["season", "gameweek", "team_id", "fixture_count", "gameweek_type"]],
+        on=["season", "gameweek", "team_id"], how="left", validate="many_to_one"
     )
+    missing_calendar = grouped["fixture_count"].isna().sum()
+    if missing_calendar:
+        raise ValueError(
+            f"{missing_calendar} observed player rows could not be matched to the Team × Gameweek calendar."
+        )
 
-    # --------------------------------------------------
-    # 5. Determine how many fixtures the team had
-    # --------------------------------------------------
-
-    grouped = grouped.merge(
-        calendar[
-            [
-                "season",
-                "gameweek",
-                "team_id",
-                "fixture_count",
-                "gameweek_type",
-            ]
-        ],
-        on=[
-            "season",
-            "gameweek",
-            "team_id",
-        ],
-        how="left"
-    )
-
-    # --------------------------------------------------
-    # 6. Build player active periods
-    #
-    # We don't want to manufacture rows for a player
-    # before they entered the league or after they left.
-    # --------------------------------------------------
-
+    # Player active period: only create rows between first and last observed
+    # GW. This avoids inventing records before the player entered or after the
+    # player left the dataset.
     player_periods = (
-        grouped
-        .groupby(
-            [
-                "season",
-                "player_id",
-            ],
-            as_index=False
-        )
-        .agg(
-            first_gameweek=("gameweek", "min"),
-            last_gameweek=("gameweek", "max")
-        )
+        grouped.groupby(["season", "player_id"], as_index=False)
+        .agg(first_gameweek=("gameweek", "min"), last_gameweek=("gameweek", "max"))
     )
-
-    # --------------------------------------------------
-    # 7. Create player × gameweek skeleton
-    # --------------------------------------------------
 
     skeleton_records = []
-
     for _, player in player_periods.iterrows():
+        for gw in range(int(player["first_gameweek"]), int(player["last_gameweek"]) + 1):
+            skeleton_records.append({
+                "season": player["season"],
+                "player_id": int(player["player_id"]),
+                "gameweek": gw,
+            })
+    skeleton = pd.DataFrame(skeleton_records)
 
-        gameweeks = range(
-            int(player["first_gameweek"]),
-            int(player["last_gameweek"]) + 1
-        )
-
-        for gameweek in gameweeks:
-
-            skeleton_records.append(
-                {
-                    "season": player["season"],
-                    "player_id": player["player_id"],
-                    "gameweek": gameweek,
-                }
-            )
-
-    skeleton = pd.DataFrame(
-        skeleton_records
-    )
-
-    # --------------------------------------------------
-    # 8. Determine player's team for each gameweek
-    #
-    # Normally the player already has a fixture row.
-    #
-    # For a BGW, there is no fixture row, so we infer
-    # the team from the surrounding player records.
-    # --------------------------------------------------
-
-    team_history = (
-        grouped[
-            [
-                "season",
-                "player_id",
-                "gameweek",
-                "team_id",
-                "player_name",
-                "position",
-                "team_name",
-            ]
-        ]
-        .sort_values(
-            [
-                "season",
-                "player_id",
-                "gameweek",
-            ]
-        )
-    )
+    # Infer team/metadata through gaps. Exact observed GWs always win; ffill
+    # handles a BGW after a known team, while bfill handles an initial gap.
+    team_history = grouped[[
+        "season", "player_id", "gameweek", "team_id",
+        "player_name", "position", "team_name"
+    ]].sort_values(["season", "player_id", "gameweek"])
 
     skeleton = skeleton.merge(
-        team_history,
-        on=[
-            "season",
-            "player_id",
-            "gameweek",
-        ],
-        how="left"
+        team_history, on=["season", "player_id", "gameweek"], how="left", validate="one_to_one"
     )
 
-    # Forward fill team information within each player.
-    skeleton[
-        [
-            "team_id",
-            "player_name",
-            "position",
-            "team_name",
-        ]
-    ] = (
-        skeleton
-        .groupby(
-            [
-                "season",
-                "player_id",
-            ]
-        )[
-            [
-                "team_id",
-                "player_name",
-                "position",
-                "team_name",
-            ]
-        ]
-        .ffill()
+    metadata_columns = ["team_id", "player_name", "position", "team_name"]
+    skeleton[metadata_columns] = (
+        skeleton.groupby(["season", "player_id"])[metadata_columns].ffill()
+    )
+    skeleton[metadata_columns] = (
+        skeleton.groupby(["season", "player_id"])[metadata_columns].bfill()
     )
 
-    # Backward fill handles a player's first observed
-    # gameweek if necessary.
-    skeleton[
-        [
-            "team_id",
-            "player_name",
-            "position",
-            "team_name",
-        ]
-    ] = (
-        skeleton
-        .groupby(
-            [
-                "season",
-                "player_id",
-            ]
-        )[
-            [
-                "team_id",
-                "player_name",
-                "position",
-                "team_name",
-            ]
-        ]
-        .bfill()
-    )
+    if skeleton["team_id"].isna().any():
+        raise ValueError("Could not infer a team for one or more player-gameweek rows.")
 
-    # --------------------------------------------------
-    # 9. Attach the Team × Gameweek calendar
-    # --------------------------------------------------
-
+    # Attach authoritative team calendar.
     skeleton = skeleton.merge(
-        calendar[
-            [
-                "season",
-                "gameweek",
-                "team_id",
-                "fixture_count",
-                "gameweek_type",
-            ]
-        ],
-        on=[
-            "season",
-            "gameweek",
-            "team_id",
-        ],
-        how="left"
+        calendar[["season", "gameweek", "team_id", "fixture_count", "gameweek_type"]],
+        on=["season", "gameweek", "team_id"], how="left", validate="one_to_one"
     )
-
-    # --------------------------------------------------
-    # 10. Attach aggregated player performance
-    # --------------------------------------------------
+    if skeleton["fixture_count"].isna().any():
+        raise ValueError(
+            "One or more inferred player teams are missing from the Team × Gameweek calendar."
+        )
 
     performance_columns = [
-        "minutes",
-        "starts",
-        "total_points",
-        "expected_goals",
-        "expected_assists",
-        "expected_goal_involvements",
+        "minutes", "starts", "total_points", "expected_goals",
+        "expected_assists", "expected_goal_involvements"
     ]
-
-    performance = grouped[
-        [
-            "season",
-            "gameweek",
-            "player_id",
-            "team_id",
-        ]
-        + performance_columns
-    ]
+    performance = grouped[[
+        "season", "gameweek", "player_id", "team_id"
+    ] + performance_columns]
 
     canonical = skeleton.merge(
         performance,
-        on=[
-            "season",
-            "gameweek",
-            "player_id",
-            "team_id",
-        ],
-        how="left"
+        on=["season", "gameweek", "player_id", "team_id"],
+        how="left", validate="one_to_one"
     )
 
-    # --------------------------------------------------
-    # 11. Identify BGWs
-    # --------------------------------------------------
+    canonical["has_fixture"] = canonical["fixture_count"] > 0
+    canonical["is_blank_gameweek"] = canonical["fixture_count"] == 0
+    canonical["is_double_gameweek"] = canonical["fixture_count"] > 1
 
-    canonical["has_fixture"] = (
-        canonical["fixture_count"] > 0
-    )
+    # Important semantic distinction:
+    # BGW -> NULL performance because no fixture existed.
+    # Fixture existed but player did not play -> zero performance.
+    normal_fixture_mask = canonical["fixture_count"] > 0
+    for c in performance_columns:
+        canonical.loc[normal_fixture_mask & canonical[c].isna(), c] = 0
 
-    canonical["is_blank_gameweek"] = (
-        canonical["fixture_count"] == 0
-    )
-
-    canonical["is_double_gameweek"] = (
-        canonical["fixture_count"] > 1
-    )
-
-    # --------------------------------------------------
-    # 12. Preserve the important distinction:
-    #
-    # BGW:
-    #   no fixture → performance remains NULL
-    #
-    # Normal/DGW:
-    #   fixture existed but player didn't play →
-    #   performance should be zero.
-    # --------------------------------------------------
-
-    normal_fixture_mask = (
-        canonical["fixture_count"] > 0
-    )
-
-    for column in performance_columns:
-
-        canonical.loc[
-            normal_fixture_mask & canonical[column].isna(),
-            column
-        ] = 0
-
-    # --------------------------------------------------
-    # 13. Sort final dataset
-    # --------------------------------------------------
-
-    canonical = (
-        canonical
-        .sort_values(
-            [
-                "season",
-                "player_id",
-                "gameweek",
-            ]
-        )
-        .reset_index(drop=True)
-    )
-
-    # --------------------------------------------------
-    # 14. Diagnostics
-    # --------------------------------------------------
-
-    print(
-        "DEBUG player-gameweek rows:",
-        len(canonical),
-        flush=True
-    )
-
-    print(
-        "DEBUG unique player-gameweek keys:",
-        canonical[
-            [
-                "season",
-                "gameweek",
-                "player_id",
-            ]
-        ]
-        .drop_duplicates()
-        .shape[0],
-        flush=True
-    )
-
-    duplicate_keys = (
-        canonical
-        .groupby(
-            [
-                "season",
-                "gameweek",
-                "player_id",
-            ]
-        )
-        .size()
-    )
+    canonical = canonical.sort_values(
+        ["season", "player_id", "gameweek"]
+    ).reset_index(drop=True)
 
     duplicate_count = int(
-        (duplicate_keys > 1).sum()
+        canonical.duplicated(subset=["season", "gameweek", "player_id"]).sum()
     )
+    if duplicate_count:
+        raise ValueError(
+            f"Canonical player-gameweek dataset contains {duplicate_count} duplicate rows."
+        )
 
+    print("DEBUG player-gameweek rows:", len(canonical), flush=True)
     print(
-        "DEBUG duplicate player-gameweek keys:",
-        duplicate_count,
-        flush=True
+        "DEBUG unique player-gameweek keys:",
+        canonical[["season", "gameweek", "player_id"]].drop_duplicates().shape[0],
+        flush=True,
     )
-
-    print(
-        "DEBUG BGW player-gameweek rows:",
-        int(
-            canonical["is_blank_gameweek"].sum()
-        ),
-        flush=True
-    )
-
-    print(
-        "DEBUG DGW player-gameweek rows:",
-        int(
-            canonical["is_double_gameweek"].sum()
-        ),
-        flush=True
-    )
+    print("DEBUG duplicate player-gameweek keys:", duplicate_count, flush=True)
+    print("DEBUG BGW player-gameweek rows:", int(canonical["is_blank_gameweek"].sum()), flush=True)
+    print("DEBUG DGW player-gameweek rows:", int(canonical["is_double_gameweek"].sum()), flush=True)
 
     return canonical
 
@@ -1043,290 +506,124 @@ def aggregate_player_gameweeks(df):
     return aggregated
 
 
-def build_form_features(historical):
+def build_form_features(historical, team_gameweek_calendar):
+    """
+    Build leakage-safe prediction features from the canonical Player × GW data.
+
+    BGWs remain explicit rows. In the raw canonical layer their performance
+    fields are NULL so a BGW cannot be confused with an ordinary fixture in
+    which the player simply did not play. For feature calculations, however,
+    a BGW contributes zero to the historical series because the player scored
+    zero FPL points and recorded zero minutes in that calendar gameweek.
+    """
+    df = build_player_gameweek_data(historical, team_gameweek_calendar)
+    df = df.sort_values(["season", "player_id", "gameweek"]).reset_index(drop=True)
+
+    performance_columns = [
+        "total_points", "expected_goals", "expected_assists",
+        "expected_goal_involvements", "minutes", "starts"
+    ]
+
+    # Preserve the canonical values for target construction before zero-filling.
+    # A BGW target is a legitimate 0; only the final observed GW should remain
+    # without a target.
+    target_source = df["total_points"].copy()
+    target_source = target_source.where(~df["is_blank_gameweek"], 0)
+
+    # From this point onward, NULL means BGW only, so zero-filling makes each
+    # rolling window represent actual calendar GWs rather than previous
+    # appearances.
+    for c in performance_columns:
+        df[c] = df[c].fillna(0)
+
+    grouped = df.groupby(["season", "player_id"], group_keys=False)
 
     # ---------------------------------------
-    # 1. Aggregate fixture data into
-    #    player-gameweek data
-    #
-    # IMPORTANT:
-    # We are NOT adding BGW rows yet.
-    #
-    # This step only introduces the calendar
-    # helper for validation in the next phase.
+    # Form
     # ---------------------------------------
 
-    df = aggregate_player_gameweeks(
-        historical
+    df["previous_gw_points"] = grouped["total_points"].shift(1)
+    df["rolling_3gw_points"] = grouped["total_points"].transform(
+        lambda x: x.shift(1).rolling(window=3, min_periods=3).mean()
+    )
+    df["rolling_5gw_points"] = grouped["total_points"].transform(
+        lambda x: x.shift(1).rolling(window=5, min_periods=5).mean()
+    )
+    df["rolling_10gw_points"] = grouped["total_points"].transform(
+        lambda x: x.shift(1).rolling(window=10, min_periods=10).mean()
     )
 
     # ---------------------------------------
-    # 2. Sort chronologically
+    # Underlying performance
     # ---------------------------------------
 
-    df = df.sort_values(
-        [
-            "season",
-            "player_id",
-            "gameweek"
-        ]
-    ).reset_index(
-        drop=True
-    )
+    df = add_underlying_performance_features(df)
 
     # ---------------------------------------
-    # 3. Previous Gameweek points
+    # Playing time
     # ---------------------------------------
 
-    df["previous_gw_points"] = (
-        df
-        .groupby(
-            [
-                "season",
-                "player_id"
-            ]
-        )["total_points"]
-        .shift(1)
-    )
+    df = add_playing_time_features(df)
 
     # ---------------------------------------
-    # 4. Rolling 3 GW average
-    # ---------------------------------------
-
-    df["rolling_3gw_points"] = (
-        df
-        .groupby(
-            [
-                "season",
-                "player_id"
-            ]
-        )["total_points"]
-        .transform(
-            lambda x:
-                x.shift(1)
-                .rolling(
-                    window=3,
-                    min_periods=3
-                )
-                .mean()
-        )
-    )
-
-    # ---------------------------------------
-    # 5. Rolling 5 GW average
-    # ---------------------------------------
-
-    df["rolling_5gw_points"] = (
-        df
-        .groupby(
-            [
-                "season",
-                "player_id"
-            ]
-        )["total_points"]
-        .transform(
-            lambda x:
-                x.shift(1)
-                .rolling(
-                    window=5,
-                    min_periods=5
-                )
-                .mean()
-        )
-    )
-
-    # ---------------------------------------
-    # 6. Rolling 10 GW average
-    # ---------------------------------------
-
-    df["rolling_10gw_points"] = (
-        df
-        .groupby(
-            [
-                "season",
-                "player_id"
-            ]
-        )["total_points"]
-        .transform(
-            lambda x:
-                x.shift(1)
-                .rolling(
-                    window=10,
-                    min_periods=10
-                )
-                .mean()
-        )
-    )
-
-    # ---------------------------------------
-    # 7. Underlying performance features
-    # ---------------------------------------
-
-    df = add_underlying_performance_features(
-        df
-    )
-
-    # ---------------------------------------
-    # 8. Playing-time features
-    # ---------------------------------------
-
-    df = add_playing_time_features(
-        df
-    )
-
-    # ---------------------------------------
-    # 9. Next Gameweek points
+    # Next calendar Gameweek target
     # ---------------------------------------
 
     df["next_gw_points"] = (
-        df
-        .groupby(
-            [
-                "season",
-                "player_id"
-            ]
-        )["total_points"]
-        .shift(-1)
+        target_source.groupby([df["season"], df["player_id"]]).shift(-1)
     )
 
+    print("DEBUG total player-gameweek rows:", len(df), flush=True)
     print(
-        "DEBUG total player-gameweek rows:",
-        len(df)
+        "DEBUG null targets before final-GW removal:",
+        int(df["next_gw_points"].isna().sum()),
+        flush=True,
     )
-
     print(
-        "DEBUG null targets:",
-        df["next_gw_points"]
-        .isna()
-        .sum()
+        "DEBUG BGW rows included in feature history:",
+        int(df["is_blank_gameweek"].sum()),
+        flush=True,
     )
-
     print(
-        "DEBUG players:",
-        df[
-            [
-                "season",
-                "player_id"
-            ]
-        ]
-        .drop_duplicates()
-        .shape[0]
+        "DEBUG zero-point next-GW targets:",
+        int((df["next_gw_points"] == 0).sum()),
+        flush=True,
     )
 
-    # ---------------------------------------
-    # 10. Remove rows without target
-    # ---------------------------------------
+    # Remove only rows with no following calendar GW. A BGW target is zero and
+    # must not be removed.
+    df = df.dropna(subset=["next_gw_points"]).copy()
 
-    df = df.dropna(
-        subset=[
-            "next_gw_points"
-        ]
-    ).copy()
-
-    # ---------------------------------------
-    # 11. Final grain validation
-    # ---------------------------------------
-
-    duplicate_count = (
-        df
-        .duplicated(
-            subset=[
-                "season",
-                "gameweek",
-                "player_id"
-            ]
-        )
-        .sum()
+    duplicate_count = int(
+        df.duplicated(subset=["season", "gameweek", "player_id"]).sum()
     )
-
-    if duplicate_count > 0:
-
+    if duplicate_count:
         raise ValueError(
-            "Final prediction feature dataset "
-            "contains duplicate player-gameweek "
+            "Final prediction feature dataset contains duplicate player-gameweek "
             f"rows: {duplicate_count}"
         )
 
-    print(
-        "DEBUG final feature rows:",
-        len(df)
-    )
+    print("DEBUG final feature rows:", len(df), flush=True)
 
-    # ---------------------------------------
-    # 12. Keep required fields
-    # ---------------------------------------
-
-    features = df[
-        [
-            "season",
-            "gameweek",
-            "player_id",
-            "player_name",
-            "position",
-            "team_id",
-            "team_name",
-
-            # -------------------------
-            # Form
-            # -------------------------
-
-            "previous_gw_points",
-            "rolling_3gw_points",
-            "rolling_5gw_points",
-            "rolling_10gw_points",
-
-            # -------------------------
-            # xG
-            # -------------------------
-
-            "previous_gw_xg",
-            "rolling_3gw_xg",
-            "rolling_5gw_xg",
-            "rolling_10gw_xg",
-
-            # -------------------------
-            # xA
-            # -------------------------
-
-            "previous_gw_xa",
-            "rolling_3gw_xa",
-            "rolling_5gw_xa",
-            "rolling_10gw_xa",
-
-            # -------------------------
-            # xGI
-            # -------------------------
-
-            "previous_gw_xgi",
-            "rolling_3gw_xgi",
-            "rolling_5gw_xgi",
-            "rolling_10gw_xgi",
-
-            # -------------------------
-            # Playing time
-            # -------------------------
-
-            "previous_gw_minutes",
-            "rolling_3gw_minutes",
-            "rolling_5gw_minutes",
-            "rolling_10gw_minutes",
-
-            "previous_gw_starts",
-            "rolling_3gw_starts",
-            "rolling_5gw_starts",
-            "rolling_10gw_starts",
-
-            "rolling_3gw_start_rate",
-            "rolling_5gw_start_rate",
-            "rolling_10gw_start_rate",
-
-            # -------------------------
-            # Target
-            # -------------------------
-
-            "next_gw_points"
-        ]
-    ].copy()
+    features = df[[
+        "season", "gameweek", "player_id", "player_name", "position",
+        "team_id", "team_name",
+        "previous_gw_points", "rolling_3gw_points", "rolling_5gw_points",
+        "rolling_10gw_points",
+        "previous_gw_xg", "rolling_3gw_xg", "rolling_5gw_xg",
+        "rolling_10gw_xg",
+        "previous_gw_xa", "rolling_3gw_xa", "rolling_5gw_xa",
+        "rolling_10gw_xa",
+        "previous_gw_xgi", "rolling_3gw_xgi", "rolling_5gw_xgi",
+        "rolling_10gw_xgi",
+        "previous_gw_minutes", "rolling_3gw_minutes", "rolling_5gw_minutes",
+        "rolling_10gw_minutes",
+        "previous_gw_starts", "rolling_3gw_starts", "rolling_5gw_starts",
+        "rolling_10gw_starts",
+        "rolling_3gw_start_rate", "rolling_5gw_start_rate",
+        "rolling_10gw_start_rate",
+        "next_gw_points"
+    ]].copy()
 
     return features
 
@@ -1669,4 +966,3 @@ def add_playing_time_features(df):
     )
 
     return df
-
