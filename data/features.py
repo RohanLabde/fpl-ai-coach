@@ -262,7 +262,7 @@ def build_player_gameweek_data(historical, team_gameweek_calendar):
     ]].sort_values(["season", "player_id", "gameweek"])
 
     skeleton = skeleton.merge(
-        team_history, on=["season", "player_id", "gameweek"], how="left", validate="many_to_one"
+        team_history, on=["season", "player_id", "gameweek"], how="left", validate="one_to_one"
     )
 
     metadata_columns = ["team_id", "player_name", "position", "team_name"]
@@ -279,7 +279,7 @@ def build_player_gameweek_data(historical, team_gameweek_calendar):
     # Attach authoritative team calendar.
     skeleton = skeleton.merge(
         calendar[["season", "gameweek", "team_id", "fixture_count", "gameweek_type"]],
-        on=["season", "gameweek", "team_id"], how="left", validate="many_to_one"
+        on=["season", "gameweek", "team_id"], how="left", validate="one_to_one"
     )
     if skeleton["fixture_count"].isna().any():
         raise ValueError(
