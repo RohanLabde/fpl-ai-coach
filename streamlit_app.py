@@ -31,7 +31,10 @@ HISTORICAL_2025_26_URL = (
 
 from data.fpl_api import get_fpl_data, get_fixtures
 from data.fpl_data import get_players
-from data.features import build_form_features
+from data.features import (
+    build_form_features,
+    build_team_gameweek_calendar
+)
 
 
 st.set_page_config(
@@ -40,7 +43,13 @@ st.set_page_config(
     layout="wide"
 )
 
+
 st.title("⚽ FPL AI Coach")
+
+
+# ============================================================
+# FPL DATA
+# ============================================================
 
 st.subheader("FPL Data")
 
@@ -49,18 +58,27 @@ if st.button("🔄 Update Player Database"):
 
     try:
 
-        with st.spinner("Downloading latest FPL data..."):
+        with st.spinner(
+            "Downloading latest FPL data..."
+        ):
 
             data = get_fpl_data()
 
-        players = get_players(data)
+        players = get_players(
+            data
+        )
 
-        with st.spinner("Saving players to database..."):
+        with st.spinner(
+            "Saving players to database..."
+        ):
 
-            save_players(players)
+            save_players(
+                players
+            )
 
         st.success(
-            f"Successfully updated {len(players)} players!"
+            f"Successfully updated "
+            f"{len(players)} players!"
         )
 
     except Exception as e:
@@ -70,7 +88,9 @@ if st.button("🔄 Update Player Database"):
         )
 
 
-# Read database
+# ============================================================
+# READ DATABASE
+# ============================================================
 
 try:
 
@@ -94,11 +114,18 @@ except Exception as e:
         f"Could not read database: {e}"
     )
 
+
+# ============================================================
+# HISTORICAL DATA TEST
+# ============================================================
+
 if st.button("📚 Test Historical Data"):
 
     try:
 
-        with st.spinner("Downloading 2025/26 historical data..."):
+        with st.spinner(
+            "Downloading 2025/26 historical data..."
+        ):
 
             historical = pd.read_csv(
                 HISTORICAL_2025_26_URL
@@ -132,14 +159,23 @@ if st.button("📚 Test Historical Data"):
             f"Historical data download failed: {e}"
         )
 
-st.subheader("Team Mapping Test")
+
+# ============================================================
+# TEAM MAPPING TEST
+# ============================================================
+
+st.subheader(
+    "Team Mapping Test"
+)
 
 
 if st.button("🔎 Test Team Mapping"):
 
     try:
 
-        with st.spinner("Downloading team mapping..."):
+        with st.spinner(
+            "Downloading team mapping..."
+        ):
 
             team_data = load_team_mapping()
 
@@ -148,7 +184,8 @@ if st.button("🔎 Test Team Mapping"):
         )
 
         st.success(
-            f"Successfully loaded {len(teams)} teams!"
+            f"Successfully loaded "
+            f"{len(teams)} teams!"
         )
 
         st.dataframe(
@@ -162,10 +199,19 @@ if st.button("🔎 Test Team Mapping"):
             f"Team mapping failed: {e}"
         )
 
-st.subheader("Historical Data Join Test")
+
+# ============================================================
+# HISTORICAL DATA JOIN TEST
+# ============================================================
+
+st.subheader(
+    "Historical Data Join Test"
+)
 
 
-if st.button("🔗 Test Player + Fixture Join"):
+if st.button(
+    "🔗 Test Player + Fixture Join"
+):
 
     try:
 
@@ -275,7 +321,216 @@ if st.button("🔗 Test Player + Fixture Join"):
             f"Historical join failed: {e}"
         )
 
-st.subheader("Historical Database Import")
+
+# ============================================================
+# TEAM × GAMEWEEK CALENDAR VALIDATION
+# ============================================================
+
+st.subheader(
+    "Team × Gameweek Calendar Test"
+)
+
+
+if st.button(
+    "📅 Validate Team × Gameweek Calendar"
+):
+
+    try:
+
+        with st.spinner(
+            "Downloading fixture calendar..."
+        ):
+
+            players, fixtures = (
+                load_historical_data()
+            )
+
+
+        with st.spinner(
+            "Building Team × Gameweek calendar..."
+        ):
+
+            calendar = (
+                build_team_gameweek_calendar(
+                    fixtures
+                )
+            )
+
+
+        st.success(
+            "Team × Gameweek calendar "
+            "created successfully!"
+        )
+
+
+        # --------------------------------
+        # Summary metrics
+        # --------------------------------
+
+        col1, col2, col3, col4 = st.columns(4)
+
+
+        col1.metric(
+            "Calendar rows",
+            len(calendar)
+        )
+
+
+        col2.metric(
+            "Gameweeks",
+            calendar["gameweek"].nunique()
+        )
+
+
+        col3.metric(
+            "Teams",
+            calendar["team_id"].nunique()
+        )
+
+
+        col4.metric(
+            "BGW team rows",
+            (
+                calendar["gameweek_type"] == "BGW"
+            ).sum()
+        )
+
+
+        # --------------------------------
+        # DGW metric
+        # --------------------------------
+
+        st.metric(
+            "DGW team rows",
+            (
+                calendar["gameweek_type"] == "DGW"
+            ).sum()
+        )
+
+
+        # --------------------------------
+        # Gameweek summary
+        # --------------------------------
+
+        st.subheader(
+            "Gameweek Summary"
+        )
+
+
+        gameweek_summary = (
+            calendar
+            .groupby(
+                [
+                    "gameweek",
+                    "gameweek_type"
+                ]
+            )
+            .size()
+            .reset_index(
+                name="team_count"
+            )
+            .sort_values(
+                [
+                    "gameweek",
+                    "gameweek_type"
+                ]
+            )
+        )
+
+
+        st.dataframe(
+            gameweek_summary,
+            use_container_width=True
+        )
+
+
+        # --------------------------------
+        # BGW team rows
+        # --------------------------------
+
+        st.subheader(
+            "Blank Gameweek Team Rows"
+        )
+
+
+        bgw_rows = calendar[
+            calendar["gameweek_type"] == "BGW"
+        ]
+
+
+        st.dataframe(
+            bgw_rows,
+            use_container_width=True
+        )
+
+
+        # --------------------------------
+        # DGW team rows
+        # --------------------------------
+
+        st.subheader(
+            "Double Gameweek Team Rows"
+        )
+
+
+        dgw_rows = calendar[
+            calendar["gameweek_type"] == "DGW"
+        ]
+
+
+        st.dataframe(
+            dgw_rows,
+            use_container_width=True
+        )
+
+
+        # --------------------------------
+        # Calendar validation
+        # --------------------------------
+
+        duplicate_count = (
+            calendar
+            .duplicated(
+                subset=[
+                    "gameweek",
+                    "team_id"
+                ]
+            )
+            .sum()
+        )
+
+
+        if duplicate_count == 0:
+
+            st.success(
+                "Calendar validation passed: "
+                "no duplicate Team × Gameweek keys."
+            )
+
+        else:
+
+            st.error(
+                "Calendar validation failed: "
+                f"{duplicate_count} duplicate "
+                "Team × Gameweek keys found."
+            )
+
+
+    except Exception as e:
+
+        st.error(
+            f"Team × Gameweek calendar "
+            f"validation failed: {e}"
+        )
+
+
+# ============================================================
+# HISTORICAL DATABASE IMPORT
+# ============================================================
+
+st.subheader(
+    "Historical Database Import"
+)
 
 
 if st.button(
@@ -319,7 +574,8 @@ if st.button(
 
 
         st.info(
-            f"Ready to import {len(records):,} records."
+            f"Ready to import "
+            f"{len(records):,} records."
         )
 
 
@@ -344,10 +600,19 @@ if st.button(
             f"Historical import failed: {e}"
         )
 
-st.subheader("Prediction Feature Test")
+
+# ============================================================
+# PREDICTION FEATURE TEST
+# ============================================================
+
+st.subheader(
+    "Prediction Feature Test"
+)
 
 
-if st.button("🧠 Build Form Features"):
+if st.button(
+    "🧠 Build Form Features"
+):
 
     try:
 
@@ -365,6 +630,7 @@ if st.button("🧠 Build Form Features"):
                 team_data
             )
 
+
             historical = (
                 prepare_historical_data(
                     players,
@@ -381,13 +647,16 @@ if st.button("🧠 Build Form Features"):
             features = build_form_features(
                 historical
             )
+
+
         with st.spinner(
             "Saving prediction features to Supabase..."
         ):
-        
+
             saved = save_prediction_features(
                 features
             )
+
 
         st.success(
             f"Form features created and "
@@ -401,15 +670,18 @@ if st.button("🧠 Build Form Features"):
 
         col1, col2, col3 = st.columns(3)
 
+
         col1.metric(
             "Feature rows",
             len(features)
         )
 
+
         col2.metric(
             "Players",
             features["player_id"].nunique()
         )
+
 
         col3.metric(
             "Gameweeks",
@@ -425,40 +697,45 @@ if st.button("🧠 Build Form Features"):
             "Prediction Feature Preview"
         )
 
+
         st.dataframe(
-        features[
-            [
-                "gameweek",
-                "player_name",
-                "team_name",
-            
-                # Form
-                "rolling_3gw_points",
-                "rolling_5gw_points",
-            
-                # Underlying performance
-                "rolling_3gw_xg",
-                "rolling_3gw_xa",
-                "rolling_3gw_xgi",
-            
-                # Playing time
-                "previous_gw_minutes",
-                "rolling_3gw_minutes",
-                "rolling_5gw_minutes",
-            
-                "previous_gw_starts",
-                "rolling_3gw_starts",
-                "rolling_5gw_starts",
-            
-                "rolling_3gw_start_rate",
-                "rolling_5gw_start_rate",
-            
-                # Target
-                "next_gw_points"
-            ]
-        ].head(30),
-        use_container_width=True
-    )
+            features[
+                [
+                    "gameweek",
+                    "player_name",
+                    "team_name",
+
+                    # Form
+
+                    "rolling_3gw_points",
+                    "rolling_5gw_points",
+
+                    # Underlying performance
+
+                    "rolling_3gw_xg",
+                    "rolling_3gw_xa",
+                    "rolling_3gw_xgi",
+
+                    # Playing time
+
+                    "previous_gw_minutes",
+                    "rolling_3gw_minutes",
+                    "rolling_5gw_minutes",
+
+                    "previous_gw_starts",
+                    "rolling_3gw_starts",
+                    "rolling_5gw_starts",
+
+                    "rolling_3gw_start_rate",
+                    "rolling_5gw_start_rate",
+
+                    # Target
+
+                    "next_gw_points"
+                ]
+            ].head(30),
+            use_container_width=True
+        )
 
 
     except Exception as e:
@@ -467,57 +744,107 @@ if st.button("🧠 Build Form Features"):
             f"Feature engineering failed: {e}"
         )
 
+
+# ============================================================
+# FIXTURE HORIZON TEST
+# ============================================================
+
 st.divider()
 
-st.header("Fixture Horizon Test")
 
-if st.button("🔮 Test Arsenal Fixture Horizon"):
+st.header(
+    "Fixture Horizon Test"
+)
+
+
+if st.button(
+    "🔮 Test Arsenal Fixture Horizon"
+):
 
     test_team_id = 1
+
     test_current_gameweek = 10
 
-    fixtures = pd.DataFrame(get_fixtures())
-    fixture_horizon = get_team_fixture_horizon(
-        fixtures,
-        team_id=test_team_id,
-        current_gameweek=test_current_gameweek,
-        horizon=5
+
+    fixtures = pd.DataFrame(
+        get_fixtures()
     )
 
-    st.subheader("Arsenal — Next 5 Gameweeks")
+
+    fixture_horizon = (
+        get_team_fixture_horizon(
+            fixtures,
+            team_id=test_team_id,
+            current_gameweek=test_current_gameweek,
+            horizon=5
+        )
+    )
+
+
+    st.subheader(
+        "Arsenal — Next 5 Gameweeks"
+    )
+
 
     st.dataframe(
         fixture_horizon,
         use_container_width=True
     )
 
-    summary = summarize_fixture_horizon(
-        fixtures,
-        team_id=test_team_id,
-        current_gameweek=test_current_gameweek
+
+    summary = (
+        summarize_fixture_horizon(
+            fixtures,
+            team_id=test_team_id,
+            current_gameweek=test_current_gameweek
+        )
     )
 
-    st.subheader("Fixture Summary")
 
-    st.json(summary)
-
-st.header("Fixture Feature Test")
-
-if st.button("🧪 Build Fixture Features"):
-
-    fixtures = pd.DataFrame(get_fixtures())
-
-    fixture_features = build_fixture_features(
-        fixtures
+    st.subheader(
+        "Fixture Summary"
     )
+
+
+    st.json(
+        summary
+    )
+
+
+# ============================================================
+# FIXTURE FEATURE TEST
+# ============================================================
+
+st.header(
+    "Fixture Feature Test"
+)
+
+
+if st.button(
+    "🧪 Build Fixture Features"
+):
+
+    fixtures = pd.DataFrame(
+        get_fixtures()
+    )
+
+
+    fixture_features = (
+        build_fixture_features(
+            fixtures
+        )
+    )
+
 
     st.success(
         "Fixture features created successfully!"
     )
 
+
     st.write(
         f"Rows: {len(fixture_features)}"
     )
+
 
     st.dataframe(
         fixture_features.head(20),
