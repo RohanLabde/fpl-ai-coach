@@ -262,7 +262,7 @@ def build_player_gameweek_data(historical, team_gameweek_calendar):
     ]].sort_values(["season", "player_id", "gameweek"])
 
     skeleton = skeleton.merge(
-        team_history, on=["season", "player_id", "gameweek"], how="left", validate="one_to_one"
+        team_history, on=["season", "player_id", "gameweek"], how="left", validate="many_to_one"
     )
 
     metadata_columns = ["team_id", "player_name", "position", "team_name"]
