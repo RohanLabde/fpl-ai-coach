@@ -908,6 +908,7 @@ def add_underlying_performance_features(df):
                     )
                     .mean()
             )
+        )
 
     # ---------------------------------------
     # xG
@@ -1048,6 +1049,7 @@ def add_playing_time_features(df):
                     )
                     .mean()
             )
+        )
 
     # ---------------------------------------
     # Minutes
