@@ -33,7 +33,8 @@ from data.fpl_api import get_fpl_data, get_fixtures
 from data.fpl_data import get_players
 from data.features import (
     build_form_features,
-    build_team_gameweek_calendar
+    build_team_gameweek_calendar,
+    aggregate_player_gameweeks
 )
 
 
@@ -523,6 +524,291 @@ if st.button(
             f"validation failed: {e}"
         )
 
+st.subheader("Player × Gameweek Canonicalization Test")
+
+
+if st.button("🧩 Test Player × Gameweek Canonicalization"):
+
+    try:
+
+        with st.spinner(
+            "Preparing historical player data..."
+        ):
+
+            players, fixtures = (
+                load_historical_data()
+            )
+
+            team_data = load_team_mapping()
+
+            teams = create_team_mapping(
+                team_data
+            )
+
+            historical = prepare_historical_data(
+                players,
+                fixtures,
+                teams
+            )
+
+
+        with st.spinner(
+            "Building Team × Gameweek calendar..."
+        ):
+
+            calendar = build_team_gameweek_calendar(
+                fixtures
+            )
+
+
+        with st.spinner(
+            "Aggregating player gameweeks..."
+        ):
+
+            player_gameweeks = (
+                aggregate_player_gameweeks(
+                    historical
+                )
+            )
+
+
+        # --------------------------------
+        # Validation
+        # --------------------------------
+
+        total_rows = len(
+            player_gameweeks
+        )
+
+        unique_keys = (
+            player_gameweeks[
+                [
+                    "season",
+                    "gameweek",
+                    "player_id"
+                ]
+            ]
+            .drop_duplicates()
+            .shape[0]
+        )
+
+        duplicate_keys = (
+            total_rows -
+            unique_keys
+        )
+
+
+        # --------------------------------
+        # DGW validation
+        # --------------------------------
+
+        dgw_player_rows = (
+            player_gameweeks[
+                player_gameweeks[
+                    "fixture_count"
+                ] > 1
+            ]
+        )
+
+
+        # --------------------------------
+        # Calendar join
+        # --------------------------------
+
+        calendar_player = (
+            player_gameweeks.merge(
+                calendar[
+                    [
+                        "gameweek",
+                        "team_id",
+                        "fixture_count",
+                        "gameweek_type"
+                    ]
+                ],
+                on=[
+                    "gameweek",
+                    "team_id"
+                ],
+                how="left",
+                suffixes=(
+                    "_player",
+                    "_calendar"
+                )
+            )
+        )
+
+
+        # --------------------------------
+        # Check fixture-count agreement
+        # --------------------------------
+
+        fixture_count_mismatches = (
+            calendar_player[
+                "fixture_count_player"
+            ]
+            !=
+            calendar_player[
+                "fixture_count_calendar"
+            ]
+        ).sum()
+
+
+        # --------------------------------
+        # Results
+        # --------------------------------
+
+        if duplicate_keys > 0:
+
+            st.error(
+                "Player × Gameweek "
+                "canonicalization failed: "
+                f"{duplicate_keys} duplicate keys found."
+            )
+
+        elif fixture_count_mismatches > 0:
+
+            st.error(
+                "Player × Gameweek "
+                "canonicalization failed: "
+                f"{fixture_count_mismatches} "
+                "fixture-count mismatches."
+            )
+
+        else:
+
+            st.success(
+                "Player × Gameweek aggregation "
+                "passed successfully!"
+            )
+
+
+        # --------------------------------
+        # Metrics
+        # --------------------------------
+
+        col1, col2, col3, col4 = (
+            st.columns(4)
+        )
+
+
+        col1.metric(
+            "Player × GW rows",
+            total_rows
+        )
+
+
+        col2.metric(
+            "Unique Player × GW",
+            unique_keys
+        )
+
+
+        col3.metric(
+            "DGW Player rows",
+            len(dgw_player_rows)
+        )
+
+
+        col4.metric(
+            "Duplicate keys",
+            duplicate_keys
+        )
+
+
+        # --------------------------------
+        # DGW summary
+        # --------------------------------
+
+        st.subheader(
+            "Double Gameweek Summary"
+        )
+
+
+        dgw_summary = (
+            player_gameweeks[
+                player_gameweeks[
+                    "fixture_count"
+                ] > 1
+            ]
+            .groupby(
+                "gameweek"
+            )
+            .agg(
+                player_rows=(
+                    "player_id",
+                    "count"
+                ),
+                players=(
+                    "player_id",
+                    "nunique"
+                )
+            )
+            .reset_index()
+            .sort_values(
+                "gameweek"
+            )
+        )
+
+
+        st.dataframe(
+            dgw_summary,
+            use_container_width=True
+        )
+
+
+        # --------------------------------
+        # Preview
+        # --------------------------------
+
+        st.subheader(
+            "Player × Gameweek Preview"
+        )
+
+
+        preview_columns = [
+            "season",
+            "gameweek",
+            "player_id",
+            "player_name",
+            "team_id",
+            "team_name",
+            "fixture_count",
+            "minutes",
+            "starts",
+            "total_points",
+            "expected_goals",
+            "expected_assists",
+            "expected_goal_involvements"
+        ]
+
+
+        st.dataframe(
+            player_gameweeks[
+                preview_columns
+            ].head(30),
+            use_container_width=True
+        )
+
+
+        # --------------------------------
+        # Important note
+        # --------------------------------
+
+        st.info(
+            "This test currently validates "
+            "fixture-level → Player × Gameweek "
+            "aggregation. BGW rows are not yet "
+            "being created. That is the next "
+            "implementation step."
+        )
+
+
+    except Exception as e:
+
+        st.error(
+            "Player × Gameweek "
+            f"canonicalization failed: {e}"
+        )
 
 # ============================================================
 # HISTORICAL DATABASE IMPORT
