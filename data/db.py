@@ -1,5 +1,6 @@
 import streamlit as st
 from sqlalchemy import text
+from collections import Counter
 
 
 def get_database_connection():
@@ -77,6 +78,7 @@ def save_players(players):
             )
 
         session.commit()
+
 
 def save_historical_data(records):
 
@@ -230,13 +232,11 @@ def save_historical_data(records):
         """
     )
 
-    # Convert dataframe into dictionaries
     data = records.to_dict(
         orient="records"
     )
 
     batch_size = 500
-
     total = len(data)
 
     with conn.session as session:
@@ -260,12 +260,21 @@ def save_historical_data(records):
 
     return total
 
+
 def save_prediction_features(features):
 
     conn = get_database_connection()
 
-    print("DEBUG: save_prediction_features started", flush=True)
-    print(f"DEBUG: total feature rows = {len(features)}", flush=True)
+    print(
+        "DEBUG: save_prediction_features started",
+        flush=True
+    )
+
+    print(
+        f"DEBUG: total feature rows = {len(features)}",
+        flush=True
+    )
+
     sql = text(
         """
         INSERT INTO prediction_features (
@@ -364,7 +373,6 @@ def save_prediction_features(features):
             player_id
         )
         DO UPDATE SET
-
             player_name = EXCLUDED.player_name,
             position = EXCLUDED.position,
             team_id = EXCLUDED.team_id,
@@ -400,11 +408,21 @@ def save_prediction_features(features):
             rolling_5gw_starts = EXCLUDED.rolling_5gw_starts,
             rolling_10gw_starts = EXCLUDED.rolling_10gw_starts,
 
-            rolling_3gw_start_rate = EXCLUDED.rolling_3gw_start_rate,
-            rolling_5gw_start_rate = EXCLUDED.rolling_5gw_start_rate,
-            rolling_10gw_start_rate = EXCLUDED.rolling_10gw_start_rate,
+            rolling_3gw_start_rate =
+                EXCLUDED.rolling_3gw_start_rate,
+            rolling_5gw_start_rate =
+                EXCLUDED.rolling_5gw_start_rate,
+            rolling_10gw_start_rate =
+                EXCLUDED.rolling_10gw_start_rate,
 
             next_gw_points = EXCLUDED.next_gw_points
+        """
+    )
+
+    delete_sql = text(
+        """
+        DELETE FROM prediction_features
+        WHERE season = :season
         """
     )
 
@@ -412,17 +430,20 @@ def save_prediction_features(features):
         orient="records"
     )
 
-    print(
-        f"DEBUG: total records = {len(data)}",
-        flush=True
+    if not data:
+        print(
+            "DEBUG: no prediction feature rows to save",
+            flush=True
+        )
+        return 0
+
+    seasons = sorted(
+        {
+            row["season"]
+            for row in data
+        }
     )
-    
-    # ---------------------------------------------------------
-    # DEBUG: Check for duplicate database keys
-    # ---------------------------------------------------------
-    
-    from collections import Counter
-    
+
     keys = [
         (
             row["season"],
@@ -431,53 +452,55 @@ def save_prediction_features(features):
         )
         for row in data
     ]
-    
+
     key_counts = Counter(keys)
-    
+
     duplicate_keys = {
         key: count
         for key, count in key_counts.items()
         if count > 1
     }
-    
+
     duplicate_record_count = sum(
         count - 1
         for count in key_counts.values()
         if count > 1
     )
-    
+
+    print(
+        f"DEBUG: rebuilding seasons = {seasons}",
+        flush=True
+    )
+
     print(
         f"DEBUG: unique (season, gameweek, player_id) keys = "
         f"{len(key_counts)}",
         flush=True
     )
-    
+
     print(
         f"DEBUG: duplicate key records = "
         f"{duplicate_record_count}",
         flush=True
     )
-    
+
     print(
         f"DEBUG: number of duplicated keys = "
         f"{len(duplicate_keys)}",
         flush=True
     )
-    
-    # Print first 20 duplicated keys
-    for key, count in list(duplicate_keys.items())[:20]:
-    
-        print(
-            f"DEBUG DUPLICATE KEY: "
-            f"season={key[0]}, "
-            f"gameweek={key[1]}, "
-            f"player_id={key[2]}, "
-            f"occurrences={count}",
-            flush=True
+
+    if duplicate_keys:
+        raise ValueError(
+            "Feature dataframe contains duplicate "
+            "(season, gameweek, player_id) keys."
         )
-    
+
     batch_size = 500
     total = len(data)
+    total_batches = (
+        total + batch_size - 1
+    ) // batch_size
 
     print(
         "DEBUG: attempting to open database session",
@@ -485,52 +508,69 @@ def save_prediction_features(features):
     )
 
     with conn.session as session:
-    
-        print("DEBUG: database session opened", flush=True)
-    
-        total_batches = (total + batch_size - 1) // batch_size
-    
-        for start in range(
-            0,
-            total,
-            batch_size
-        ):
-    
-            batch_number = start // batch_size + 1
-    
-            batch = data[
-                start:start + batch_size
-            ]
-    
+
+        try:
+
             print(
-                f"DEBUG A: before session.execute "
-                f"batch {batch_number}/{total_batches} "
-                f"({len(batch)} rows)",
+                "DEBUG: database session opened",
                 flush=True
             )
-    
-            session.execute(
-                sql,
-                batch
-            )
-    
-            print(
-                f"DEBUG B: after session.execute "
-                f"batch {batch_number}/{total_batches}",
-                flush=True
-            )
-    
+
+            for season in seasons:
+
+                print(
+                    f"DEBUG: deleting existing "
+                    f"prediction features for {season}",
+                    flush=True
+                )
+
+                session.execute(
+                    delete_sql,
+                    {"season": season}
+                )
+
+            for start in range(
+                0,
+                total,
+                batch_size
+            ):
+
+                batch_number = (
+                    start // batch_size + 1
+                )
+
+                batch = data[
+                    start:start + batch_size
+                ]
+
+                print(
+                    f"DEBUG: inserting batch "
+                    f"{batch_number}/{total_batches} "
+                    f"({len(batch)} rows)",
+                    flush=True
+                )
+
+                session.execute(
+                    sql,
+                    batch
+                )
+
             session.commit()
-    
+
             print(
-                f"DEBUG C: after session.commit "
-                f"batch {batch_number}/{total_batches}",
+                "DEBUG: prediction feature rebuild committed",
                 flush=True
             )
-    
-        print(
-            "DEBUG: all prediction feature batches completed",
-            flush=True
-        )
-    
+
+        except Exception:
+
+            session.rollback()
+
+            print(
+                "DEBUG: prediction feature rebuild rolled back",
+                flush=True
+            )
+
+            raise
+
     return total
