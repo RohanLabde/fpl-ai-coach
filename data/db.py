@@ -285,6 +285,10 @@ def save_prediction_features(features):
             position,
             team_id,
             team_name,
+            next_1gw_fixture_count,
+            next_1gw_avg_fdr,
+            next_1gw_home_count,
+            next_1gw_away_count,
 
             previous_gw_points,
             rolling_3gw_points,
@@ -330,6 +334,10 @@ def save_prediction_features(features):
             :position,
             :team_id,
             :team_name,
+            :next_1gw_fixture_count,
+            :next_1gw_avg_fdr,
+            :next_1gw_home_count,
+            :next_1gw_away_count,
 
             :previous_gw_points,
             :rolling_3gw_points,
@@ -378,6 +386,10 @@ def save_prediction_features(features):
             team_id = EXCLUDED.team_id,
             team_name = EXCLUDED.team_name,
 
+            next_1gw_fixture_count = EXCLUDED.next_1gw_fixture_count,
+            next_1gw_avg_fdr = EXCLUDED.next_1gw_avg_fdr,
+            next_1gw_home_count = EXCLUDED.next_1gw_home_count,
+            next_1gw_away_count = EXCLUDED.next_1gw_away_count,
             previous_gw_points = EXCLUDED.previous_gw_points,
             rolling_3gw_points = EXCLUDED.rolling_3gw_points,
             rolling_5gw_points = EXCLUDED.rolling_5gw_points,
