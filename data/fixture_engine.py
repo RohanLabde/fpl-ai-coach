@@ -1,318 +1,163 @@
 import pandas as pd
 
 
+NEXT_GW_FIXTURE_COLUMNS = [
+    "next_1gw_fixture_count",
+    "next_1gw_avg_fdr",
+    "next_1gw_home_count",
+    "next_1gw_away_count",
+]
+
+
 def prepare_fixture_data(fixtures):
-    """
-    Prepare the raw FPL fixture data for fixture analysis.
-    """
+    """Normalize raw FPL fixture data for team-level feature engineering."""
+    required = [
+        "id", "event", "team_h", "team_a", "team_h_difficulty",
+        "team_a_difficulty", "finished", "kickoff_time",
+    ]
+    missing = [column for column in required if column not in fixtures.columns]
+    if missing:
+        raise ValueError(f"Fixture data is missing required columns: {missing}")
 
-    fixture_data = fixtures[
-        [
-            "id",
-            "event",
-            "team_h",
-            "team_a",
-            "team_h_difficulty",
-            "team_a_difficulty",
-            "finished",
-            "kickoff_time"
-        ]
-    ].copy()
-
-    fixture_data = fixture_data.rename(
+    return fixtures[required].copy().rename(
         columns={
             "id": "fixture_id",
             "event": "gameweek",
             "team_h": "home_team_id",
             "team_a": "away_team_id",
             "team_h_difficulty": "home_fixture_difficulty",
-            "team_a_difficulty": "away_fixture_difficulty"
+            "team_a_difficulty": "away_fixture_difficulty",
         }
     )
 
-    return fixture_data
 
+def _team_fixture_rows(fixtures):
+    fixture_data = prepare_fixture_data(fixtures).dropna(subset=["gameweek"]).copy()
+    fixture_data["gameweek"] = pd.to_numeric(
+        fixture_data["gameweek"], errors="raise"
+    ).astype(int)
 
-def get_team_fixture_horizon(
-    fixtures,
-    team_id,
-    current_gameweek,
-    horizon=5
-):
-    """
-    Return upcoming fixtures for a team over the next N gameweeks.
-    """
-
-    fixture_data = prepare_fixture_data(fixtures)
-
-    # Remove fixtures without a gameweek
-    fixture_data = fixture_data.dropna(
-        subset=["gameweek"]
-    )
-
-    # Only look at future gameweeks
-    future_fixtures = fixture_data[
-        fixture_data["gameweek"] > current_gameweek
-    ].copy()
-
-    # Keep only fixtures involving this team
-    team_fixtures = future_fixtures[
-        (
-            (future_fixtures["home_team_id"] == team_id)
-            |
-            (future_fixtures["away_team_id"] == team_id)
-        )
-    ].copy()
-
-    # Only look at the requested horizon
-    max_gameweek = current_gameweek + horizon
-
-    team_fixtures = team_fixtures[
-        team_fixtures["gameweek"] <= max_gameweek
-    ].copy()
-
-    # Determine whether this team is home
-    team_fixtures["was_home"] = (
-        team_fixtures["home_team_id"] == team_id
-    )
-
-    # Select the correct fixture difficulty
-    team_fixtures["fixture_difficulty"] = (
-        team_fixtures["home_fixture_difficulty"]
-        .where(
-            team_fixtures["was_home"],
-            team_fixtures["away_fixture_difficulty"]
-        )
-    )
-
-    return team_fixtures[
-        [
-            "fixture_id",
-            "gameweek",
-            "was_home",
-            "fixture_difficulty",
-            "kickoff_time",
-            "finished"
-        ]
-    ].sort_values(
-        ["gameweek", "fixture_id"]
-    )
-
-
-def summarize_fixture_horizon(
-    fixtures,
-    team_id,
-    current_gameweek
-):
-    """
-    Create summary fixture features for the next
-    1, 3 and 5 gameweeks.
-    """
-
-    fixture_data = prepare_fixture_data(fixtures)
-
-    fixture_data = fixture_data.dropna(
-        subset=["gameweek"]
-    )
-
-    future_fixtures = fixture_data[
-        fixture_data["gameweek"] > current_gameweek
-    ].copy()
-
-    future_fixtures = future_fixtures[
-        (
-            (future_fixtures["home_team_id"] == team_id)
-            |
-            (future_fixtures["away_team_id"] == team_id)
-        )
-    ].copy()
-
-    future_fixtures["was_home"] = (
-        future_fixtures["home_team_id"] == team_id
-    )
-
-    future_fixtures["fixture_difficulty"] = (
-        future_fixtures["home_fixture_difficulty"]
-        .where(
-            future_fixtures["was_home"],
-            future_fixtures["away_fixture_difficulty"]
-        )
-    )
-
-    result = {}
-
-    for horizon in [1, 3, 5]:
-
-        horizon_fixtures = future_fixtures[
-            future_fixtures["gameweek"]
-            <= current_gameweek + horizon
-        ]
-
-        result[f"next_{horizon}gw_fixture_count"] = (
-            len(horizon_fixtures)
-        )
-
-        if len(horizon_fixtures) > 0:
-            result[f"next_{horizon}gw_avg_fdr"] = (
-                horizon_fixtures["fixture_difficulty"]
-                .mean()
-            )
-        else:
-            result[f"next_{horizon}gw_avg_fdr"] = None
-
-    return result
-
-def build_fixture_features(fixtures):
-    """
-    Build fixture-based prediction features for every
-    team and gameweek in the fixture dataset.
-
-    Each row represents:
-        team_id + current_gameweek
-
-    Features describe the team's upcoming fixtures
-    over the next 1, 3 and 5 gameweeks.
-    """
-
-    fixture_data = prepare_fixture_data(fixtures)
-
-    fixture_data = fixture_data.dropna(
-        subset=["gameweek"]
-    ).copy()
-
-    fixture_data["gameweek"] = (
-        fixture_data["gameweek"].astype(int)
-    )
-
-    # -----------------------------------
-    # Create one row per team per fixture
-    # -----------------------------------
-
-    home_fixtures = fixture_data[
-        [
-            "fixture_id",
-            "gameweek",
-            "home_team_id",
-            "home_fixture_difficulty",
-            "kickoff_time",
-            "finished"
-        ]
-    ].copy()
-
-    home_fixtures = home_fixtures.rename(
+    home = fixture_data[
+        ["fixture_id", "gameweek", "home_team_id", "home_fixture_difficulty", "kickoff_time", "finished"]
+    ].rename(
         columns={
             "home_team_id": "team_id",
-            "home_fixture_difficulty": "fixture_difficulty"
+            "home_fixture_difficulty": "fixture_difficulty",
         }
     )
+    home["was_home"] = True
 
-    home_fixtures["was_home"] = True
-
-    away_fixtures = fixture_data[
-        [
-            "fixture_id",
-            "gameweek",
-            "away_team_id",
-            "away_fixture_difficulty",
-            "kickoff_time",
-            "finished"
-        ]
-    ].copy()
-
-    away_fixtures = away_fixtures.rename(
+    away = fixture_data[
+        ["fixture_id", "gameweek", "away_team_id", "away_fixture_difficulty", "kickoff_time", "finished"]
+    ].rename(
         columns={
             "away_team_id": "team_id",
-            "away_fixture_difficulty": "fixture_difficulty"
+            "away_fixture_difficulty": "fixture_difficulty",
         }
     )
+    away["was_home"] = False
 
-    away_fixtures["was_home"] = False
+    return pd.concat([home, away], ignore_index=True)
 
-    team_fixtures = pd.concat(
-        [
-            home_fixtures,
-            away_fixtures
-        ],
-        ignore_index=True
-    )
 
-    # -----------------------------------
-    # Create features for every
-    # team + current gameweek
-    # -----------------------------------
+def get_team_fixture_horizon(fixtures, team_id, current_gameweek, horizon=5):
+    """Return one team's next fixtures after current_gameweek."""
+    rows = _team_fixture_rows(fixtures)
+    result = rows[
+        rows["team_id"].eq(team_id)
+        & rows["gameweek"].gt(current_gameweek)
+        & rows["gameweek"].le(current_gameweek + horizon)
+    ].copy()
 
-    teams = team_fixtures["team_id"].dropna().unique()
-    gameweeks = sorted(
-        team_fixtures["gameweek"].dropna().unique()
-    )
+    return result[
+        ["fixture_id", "gameweek", "was_home", "fixture_difficulty", "kickoff_time", "finished"]
+    ].sort_values(["gameweek", "fixture_id"])
 
+
+def summarize_fixture_horizon(fixtures, team_id, current_gameweek):
+    """Summarize one team's next 1, 3, and 5 calendar gameweeks."""
+    rows = _team_fixture_rows(fixtures)
+    team_rows = rows[
+        rows["team_id"].eq(team_id) & rows["gameweek"].gt(current_gameweek)
+    ]
+
+    summary = {}
+    for horizon in (1, 3, 5):
+        horizon_rows = team_rows[
+            team_rows["gameweek"].le(current_gameweek + horizon)
+        ]
+        summary[f"next_{horizon}gw_fixture_count"] = len(horizon_rows)
+        summary[f"next_{horizon}gw_avg_fdr"] = (
+            horizon_rows["fixture_difficulty"].mean()
+            if not horizon_rows.empty else None
+        )
+    return summary
+
+
+def build_fixture_features(fixtures, season=None):
+    """Build future-fixture features for every team and current gameweek.
+
+    A row at gameweek t contains only fixtures scheduled in gameweeks after t.
+    It is therefore safe to join to a feature row at t when predicting the
+    next-calendar-gameweek target.
+    """
+    team_fixtures = _team_fixture_rows(fixtures)
+    teams = sorted(team_fixtures["team_id"].dropna().unique())
+    gameweeks = sorted(team_fixtures["gameweek"].dropna().unique())
     rows = []
 
     for team_id in teams:
-
-        team_data = team_fixtures[
-            team_fixtures["team_id"] == team_id
-        ].copy()
+        team_rows = team_fixtures[team_fixtures["team_id"].eq(team_id)]
 
         for current_gameweek in gameweeks:
+            row = {"team_id": int(team_id), "gameweek": int(current_gameweek)}
+            if season is not None:
+                row["season"] = season
 
-            row = {
-                "team_id": team_id,
-                "gameweek": current_gameweek
-            }
-
-            for horizon in [1, 3, 5]:
-
-                horizon_fixtures = team_data[
-                    (
-                        team_data["gameweek"]
-                        > current_gameweek
-                    )
-                    &
-                    (
-                        team_data["gameweek"]
-                        <= current_gameweek + horizon
-                    )
+            for horizon in (1, 3, 5):
+                horizon_rows = team_rows[
+                    team_rows["gameweek"].gt(current_gameweek)
+                    & team_rows["gameweek"].le(current_gameweek + horizon)
                 ]
 
-                # Fixture count
-                row[
-                    f"next_{horizon}gw_fixture_count"
-                ] = len(horizon_fixtures)
-
-                # Average FDR
-                if len(horizon_fixtures) > 0:
-
-                    row[
-                        f"next_{horizon}gw_avg_fdr"
-                    ] = (
-                        horizon_fixtures[
-                            "fixture_difficulty"
-                        ].mean()
-                    )
-
-                else:
-
-                    row[
-                        f"next_{horizon}gw_avg_fdr"
-                    ] = None
-
-                # Home fixtures
-                row[
-                    f"next_{horizon}gw_home_count"
-                ] = int(
-                    horizon_fixtures[
-                        "was_home"
-                    ].sum()
+                row[f"next_{horizon}gw_fixture_count"] = len(horizon_rows)
+                row[f"next_{horizon}gw_avg_fdr"] = (
+                    horizon_rows["fixture_difficulty"].mean()
+                    if not horizon_rows.empty else None
                 )
-
-                # Away fixtures
-                row[
-                    f"next_{horizon}gw_away_count"
-                ] = int(
-                    (~horizon_fixtures["was_home"]).sum()
-                )
+                row[f"next_{horizon}gw_home_count"] = int(horizon_rows["was_home"].sum())
+                row[f"next_{horizon}gw_away_count"] = int((~horizon_rows["was_home"]).sum())
 
             rows.append(row)
 
-    return pd.DataFrame(rows)
+    result = pd.DataFrame(rows)
+    key_columns = ["season", "gameweek", "team_id"] if season is not None else ["gameweek", "team_id"]
+    if result.duplicated(subset=key_columns).any():
+        raise ValueError("Fixture feature data contains duplicate team-gameweek keys.")
+    return result.sort_values(key_columns).reset_index(drop=True)
+
+
+def attach_fixture_features(prediction_features, fixture_features):
+    """Attach next-GW fixture context using season × gameweek × team keys."""
+    key_columns = ["season", "gameweek", "team_id"]
+    required_prediction = key_columns.copy()
+    required_fixture = key_columns + NEXT_GW_FIXTURE_COLUMNS
+
+    missing_prediction = [c for c in required_prediction if c not in prediction_features.columns]
+    missing_fixture = [c for c in required_fixture if c not in fixture_features.columns]
+    if missing_prediction:
+        raise ValueError(f"Prediction features are missing join keys: {missing_prediction}")
+    if missing_fixture:
+        raise ValueError(f"Fixture features are missing columns: {missing_fixture}")
+
+    result = prediction_features.merge(
+        fixture_features[key_columns + NEXT_GW_FIXTURE_COLUMNS],
+        on=key_columns,
+        how="left",
+        validate="many_to_one",
+    )
+
+    if result[NEXT_GW_FIXTURE_COLUMNS].isna().all(axis=1).any():
+        raise ValueError("Some prediction rows have no matching fixture features.")
+
+    return result
