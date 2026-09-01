@@ -1037,6 +1037,27 @@ def build_form_features(
         validate="one_to_one"
     )
 
+    # BGW rows remain in the calendar dataset. Their rolling form should
+    # represent the same pre-fixture history used by the next actual fixture,
+    # without filling missing values on ordinary playing gameweeks.
+    blank_mask = df["is_blank_gameweek"]
+
+    next_fixture_rollups = (
+        df
+        .groupby(
+            ["season", "player_id"],
+            group_keys=False
+        )[rolling_columns]
+        .bfill()
+    )
+
+    df.loc[
+        blank_mask,
+        rolling_columns
+    ] = next_fixture_rollups.loc[
+        blank_mask,
+        rolling_columns
+    ]
     target_source = (
         df["total_points"]
         .where(
