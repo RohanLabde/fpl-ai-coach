@@ -1,6 +1,12 @@
 import streamlit as st
 import pandas as pd
 
+from data.model import (
+    predict_next_gameweek,
+    train_and_evaluate,
+    train_final_model,
+)
+
 from data.fixture_engine import (
     get_team_fixture_horizon,
     summarize_fixture_horizon,
@@ -799,6 +805,151 @@ if st.button(
         st.error(
             f"Feature engineering failed: {e}"
         )
+
+st.divider()
+st.header("Model Training & Backtesting")
+
+st.caption(
+    "The model predicts next calendar-gameweek points from information "
+    "available at the end of the current gameweek. Evaluation uses only "
+    "later gameweeks; it is never randomly split."
+)
+
+validation_gameweeks = st.slider(
+    "Validation gameweeks",
+    min_value=4,
+    max_value=12,
+    value=8,
+    help=(
+        "The latest completed gameweeks are held out for evaluation. "
+        "Earlier rows are used for training."
+    ),
+)
+
+if st.button("Train and evaluate next-GW model", type="primary"):
+    try:
+        with st.spinner("Loading validated prediction features..."):
+            conn = get_database_connection()
+            training_features = conn.query(
+                "SELECT * FROM public.prediction_features",
+                ttl=0,
+            )
+
+        with st.spinner("Training on earlier gameweeks and evaluating later ones..."):
+            evaluation_model, evaluation, validation_results = (
+                train_and_evaluate(
+                    training_features,
+                    validation_gameweeks=validation_gameweeks,
+                )
+            )
+
+            # This version is for future scoring after evaluation is complete.
+            production_model = train_final_model(training_features)
+
+        st.session_state["fpl_production_model"] = production_model
+        st.session_state["fpl_validation_results"] = validation_results
+        st.session_state["fpl_model_evaluation"] = evaluation.to_dict()
+        st.session_state["fpl_training_features"] = training_features
+
+        st.success("Model trained and temporally evaluated.")
+
+    except Exception as error:
+        st.error(f"Model training failed: {error}")
+
+
+if "fpl_model_evaluation" in st.session_state:
+    evaluation = st.session_state["fpl_model_evaluation"]
+
+    st.subheader("Temporal Validation")
+    st.caption(
+        f"Held out {evaluation['validation_rows']:,} rows from "
+        f"{evaluation['validation_season']} gameweek "
+        f"{evaluation['validation_start_gameweek']} onward."
+    )
+
+    metric_1, metric_2, metric_3, metric_4 = st.columns(4)
+
+    metric_1.metric("Model MAE", f"{evaluation['model_mae']:.3f}")
+    metric_2.metric("Baseline MAE", f"{evaluation['baseline_mae']:.3f}")
+    metric_3.metric("Model RMSE", f"{evaluation['model_rmse']:.3f}")
+    metric_4.metric("Baseline RMSE", f"{evaluation['baseline_rmse']:.3f}")
+
+    if evaluation["model_mae"] < evaluation["baseline_mae"]:
+        st.success("The model beats the simple historical-mean baseline on the holdout period.")
+    else:
+        st.warning(
+            "The model does not yet beat the baseline. Do not use it for "
+            "transfer decisions until features or model selection improve."
+        )
+
+    st.subheader("Held-out Predictions")
+
+    validation_results = st.session_state["fpl_validation_results"].copy()
+    validation_results["absolute_error"] = validation_results[
+        "prediction_error"
+    ].abs()
+
+    st.dataframe(
+        validation_results.sort_values(
+            "absolute_error",
+            ascending=False,
+        ),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+
+if "fpl_production_model" in st.session_state:
+    st.subheader("Score Historical Feature Rows")
+    st.caption(
+        "This is an exploratory scoring view. Live recommendations require "
+        "an unlabelled current-gameweek feature row, which is the next build step."
+    )
+
+    score_frame = st.session_state["fpl_training_features"].copy()
+
+    seasons = sorted(score_frame["season"].dropna().astype(str).unique())
+    selected_season = st.selectbox("Season", seasons, key="model_score_season")
+
+    season_rows = score_frame[
+        score_frame["season"].astype(str) == selected_season
+    ]
+
+    available_gameweeks = sorted(
+        season_rows["gameweek"].dropna().astype(int).unique()
+    )
+
+    selected_gameweek = st.selectbox(
+        "Feature gameweek",
+        available_gameweeks,
+        index=len(available_gameweeks) - 1,
+        key="model_score_gameweek",
+    )
+
+    rows_to_score = season_rows[
+        season_rows["gameweek"].eq(selected_gameweek)
+    ].copy()
+
+    scored_rows = predict_next_gameweek(
+        st.session_state["fpl_production_model"],
+        rows_to_score,
+    )
+
+    st.dataframe(
+        scored_rows[
+            [
+                "player_name",
+                "position",
+                "team_name",
+                "predicted_next_gw_points",
+            ]
+        ].sort_values(
+            "predicted_next_gw_points",
+            ascending=False,
+        ),
+        use_container_width=True,
+        hide_index=True,
+    )
 
 
 # ============================================================
