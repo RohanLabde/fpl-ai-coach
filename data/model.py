@@ -33,6 +33,10 @@ NUMERIC_FEATURE_COLUMNS = [
     "rolling_3gw_start_rate", "rolling_5gw_start_rate", "rolling_10gw_start_rate",
     "next_1gw_fixture_count", "next_1gw_avg_fdr",
     "next_1gw_home_count", "next_1gw_away_count",
+    "next_1gw_fixture_count",
+    "next_1gw_avg_fdr",
+    "next_1gw_home_count",
+    "next_1gw_away_count",
 ]
 CATEGORICAL_FEATURE_COLUMNS = ["position"]
 MODEL_FEATURE_COLUMNS = NUMERIC_FEATURE_COLUMNS + CATEGORICAL_FEATURE_COLUMNS
