@@ -10,7 +10,8 @@ from data.model import (
 from data.fixture_engine import (
     get_team_fixture_horizon,
     summarize_fixture_horizon,
-    build_fixture_features
+    build_fixture_features,
+    attach_fixture_features
 )
 
 from data.historical import (
@@ -804,6 +805,15 @@ if st.button(
 
         st.error(
             f"Feature engineering failed: {e}"
+        )
+        fixture_features = build_fixture_features(
+            fixtures,
+            season=HISTORICAL_SEASON,
+        )
+        
+        features = attach_fixture_features(
+            features,
+            fixture_features,
         )
 
 st.divider()
