@@ -722,12 +722,22 @@ if st.button(
             )
 
         with st.spinner(
-            "Calculating form features..."
+            "Calculating form and fixture features..."
         ):
 
             features = build_form_features(
                 historical,
                 calendar
+            )
+
+            fixture_features = build_fixture_features(
+                fixtures,
+                season=HISTORICAL_SEASON,
+            )
+
+            features = attach_fixture_features(
+                features,
+                fixture_features,
             )
 
         with st.spinner(
@@ -805,15 +815,6 @@ if st.button(
 
         st.error(
             f"Feature engineering failed: {e}"
-        )
-        fixture_features = build_fixture_features(
-            fixtures,
-            season=HISTORICAL_SEASON,
-        )
-        
-        features = attach_fixture_features(
-            features,
-            fixture_features,
         )
 
 st.divider()
