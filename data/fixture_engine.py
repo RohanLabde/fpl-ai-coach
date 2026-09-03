@@ -8,6 +8,11 @@ NEXT_GW_FIXTURE_COLUMNS = [
     "next_1gw_away_count",
 ]
 
+NEXT_GW_OPPONENT_DEFENCE_COLUMNS = [
+    "next_1gw_opponent_avg_5fixture_goals_conceded",
+    "next_1gw_opponent_avg_5fixture_clean_sheet_rate",
+]
+
 
 def prepare_fixture_data(fixtures):
     """Normalize raw FPL fixture data for team-level feature engineering."""
@@ -19,7 +24,9 @@ def prepare_fixture_data(fixtures):
     if missing:
         raise ValueError(f"Fixture data is missing required columns: {missing}")
 
-    return fixtures[required].copy().rename(
+    optional_scores = ["team_h_score", "team_a_score"]
+    available = [column for column in optional_scores if column in fixtures.columns]
+    result = fixtures[required + available].copy().rename(
         columns={
             "id": "fixture_id",
             "event": "gameweek",
@@ -30,6 +37,12 @@ def prepare_fixture_data(fixtures):
         }
     )
 
+    for column in optional_scores:
+        if column not in result.columns:
+            result[column] = pd.NA
+
+    return result
+
 
 def _team_fixture_rows(fixtures):
     fixture_data = prepare_fixture_data(fixtures).dropna(subset=["gameweek"]).copy()
@@ -38,21 +51,25 @@ def _team_fixture_rows(fixtures):
     ).astype(int)
 
     home = fixture_data[
-        ["fixture_id", "gameweek", "home_team_id", "home_fixture_difficulty", "kickoff_time", "finished"]
+        ["fixture_id", "gameweek", "home_team_id", "away_team_id", "home_fixture_difficulty", "team_a_score", "kickoff_time", "finished"]
     ].rename(
         columns={
             "home_team_id": "team_id",
+            "away_team_id": "opponent_team_id",
             "home_fixture_difficulty": "fixture_difficulty",
+            "team_a_score": "goals_conceded",
         }
     )
     home["was_home"] = True
 
     away = fixture_data[
-        ["fixture_id", "gameweek", "away_team_id", "away_fixture_difficulty", "kickoff_time", "finished"]
+        ["fixture_id", "gameweek", "away_team_id", "home_team_id", "away_fixture_difficulty", "team_h_score", "kickoff_time", "finished"]
     ].rename(
         columns={
             "away_team_id": "team_id",
+            "home_team_id": "opponent_team_id",
             "away_fixture_difficulty": "fixture_difficulty",
+            "team_h_score": "goals_conceded",
         }
     )
     away["was_home"] = False
@@ -94,6 +111,28 @@ def summarize_fixture_horizon(fixtures, team_id, current_gameweek):
     return summary
 
 
+def _opponent_defence_as_of(team_rows, current_gameweek, lookback=5):
+    """Return a team's defensive record from fixtures completed by current_gw."""
+    completed = team_rows[
+        team_rows["gameweek"].le(current_gameweek)
+        & team_rows["finished"].eq(True)
+        & team_rows["goals_conceded"].notna()
+    ].sort_values(["gameweek", "fixture_id"])
+
+    recent = completed.tail(lookback)
+    if len(recent) < lookback:
+        return None, None
+
+    goals_conceded = pd.to_numeric(
+        recent["goals_conceded"], errors="coerce"
+    )
+
+    return (
+        goals_conceded.mean(),
+        (goals_conceded.eq(0)).mean(),
+    )
+
+
 def build_fixture_features(fixtures, season=None):
     """Build future-fixture features for every team and current gameweek.
 
@@ -105,6 +144,10 @@ def build_fixture_features(fixtures, season=None):
     teams = sorted(team_fixtures["team_id"].dropna().unique())
     gameweeks = sorted(team_fixtures["gameweek"].dropna().unique())
     rows = []
+    team_history = {
+        team_id: team_fixtures[team_fixtures["team_id"].eq(team_id)]
+        for team_id in teams
+    }
 
     for team_id in teams:
         team_rows = team_fixtures[team_fixtures["team_id"].eq(team_id)]
@@ -128,6 +171,31 @@ def build_fixture_features(fixtures, season=None):
                 row[f"next_{horizon}gw_home_count"] = int(horizon_rows["was_home"].sum())
                 row[f"next_{horizon}gw_away_count"] = int((~horizon_rows["was_home"]).sum())
 
+            immediate_opponent_goals_conceded = []
+            immediate_opponent_clean_sheet_rates = []
+
+            for opponent_id in team_rows[
+                team_rows["gameweek"].eq(current_gameweek + 1)
+            ]["opponent_team_id"].dropna().unique():
+                goals_conceded, clean_sheet_rate = _opponent_defence_as_of(
+                    team_history[int(opponent_id)],
+                    current_gameweek,
+                )
+                if goals_conceded is not None:
+                    immediate_opponent_goals_conceded.append(goals_conceded)
+                    immediate_opponent_clean_sheet_rates.append(clean_sheet_rate)
+
+            row["next_1gw_opponent_avg_5fixture_goals_conceded"] = (
+                sum(immediate_opponent_goals_conceded)
+                / len(immediate_opponent_goals_conceded)
+                if immediate_opponent_goals_conceded else None
+            )
+            row["next_1gw_opponent_avg_5fixture_clean_sheet_rate"] = (
+                sum(immediate_opponent_clean_sheet_rates)
+                / len(immediate_opponent_clean_sheet_rates)
+                if immediate_opponent_clean_sheet_rates else None
+            )
+
             rows.append(row)
 
     result = pd.DataFrame(rows)
@@ -141,7 +209,11 @@ def attach_fixture_features(prediction_features, fixture_features):
     """Attach next-GW fixture context using season × gameweek × team keys."""
     key_columns = ["season", "gameweek", "team_id"]
     required_prediction = key_columns.copy()
-    required_fixture = key_columns + NEXT_GW_FIXTURE_COLUMNS
+    required_fixture = (
+        key_columns
+        + NEXT_GW_FIXTURE_COLUMNS
+        + NEXT_GW_OPPONENT_DEFENCE_COLUMNS
+    )
 
     missing_prediction = [c for c in required_prediction if c not in prediction_features.columns]
     missing_fixture = [c for c in required_fixture if c not in fixture_features.columns]
@@ -151,7 +223,11 @@ def attach_fixture_features(prediction_features, fixture_features):
         raise ValueError(f"Fixture features are missing columns: {missing_fixture}")
 
     result = prediction_features.merge(
-        fixture_features[key_columns + NEXT_GW_FIXTURE_COLUMNS],
+        fixture_features[
+            key_columns
+            + NEXT_GW_FIXTURE_COLUMNS
+            + NEXT_GW_OPPONENT_DEFENCE_COLUMNS
+        ],
         on=key_columns,
         how="left",
         validate="many_to_one",
