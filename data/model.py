@@ -32,7 +32,9 @@ NUMERIC_FEATURE_COLUMNS = [
     "previous_gw_starts", "rolling_3gw_starts", "rolling_5gw_starts", "rolling_10gw_starts",
     "rolling_3gw_start_rate", "rolling_5gw_start_rate", "rolling_10gw_start_rate",
     "next_1gw_fixture_count", "next_1gw_avg_fdr",
-    "next_1gw_home_count", "next_1gw_away_count"
+    "next_1gw_home_count", "next_1gw_away_count",
+    "next_1gw_opponent_avg_5fixture_goals_conceded",
+    "next_1gw_opponent_avg_5fixture_clean_sheet_rate",
 ]
 CATEGORICAL_FEATURE_COLUMNS = ["position"]
 MODEL_FEATURE_COLUMNS = NUMERIC_FEATURE_COLUMNS + CATEGORICAL_FEATURE_COLUMNS
