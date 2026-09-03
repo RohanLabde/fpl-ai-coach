@@ -289,7 +289,9 @@ def save_prediction_features(features):
             next_1gw_avg_fdr,
             next_1gw_home_count,
             next_1gw_away_count,
-
+            next_1gw_opponent_avg_5fixture_goals_conceded,
+            next_1gw_opponent_avg_5fixture_clean_sheet_rate,
+            
             previous_gw_points,
             rolling_3gw_points,
             rolling_5gw_points,
@@ -338,7 +340,9 @@ def save_prediction_features(features):
             :next_1gw_avg_fdr,
             :next_1gw_home_count,
             :next_1gw_away_count,
-
+            :next_1gw_opponent_avg_5fixture_goals_conceded,
+            :next_1gw_opponent_avg_5fixture_clean_sheet_rate,
+            
             :previous_gw_points,
             :rolling_3gw_points,
             :rolling_5gw_points,
@@ -390,6 +394,8 @@ def save_prediction_features(features):
             next_1gw_avg_fdr = EXCLUDED.next_1gw_avg_fdr,
             next_1gw_home_count = EXCLUDED.next_1gw_home_count,
             next_1gw_away_count = EXCLUDED.next_1gw_away_count,
+            next_1gw_opponent_avg_5fixture_goals_conceded = EXCLUDED.next_1gw_opponent_avg_5fixture_goals_conceded,
+            next_1gw_opponent_avg_5fixture_clean_sheet_rate = EXCLUDED.next_1gw_opponent_avg_5fixture_clean_sheet_rate,
             previous_gw_points = EXCLUDED.previous_gw_points,
             rolling_3gw_points = EXCLUDED.rolling_3gw_points,
             rolling_5gw_points = EXCLUDED.rolling_5gw_points,
