@@ -164,6 +164,60 @@ def build_pipeline(random_state: int = 42) -> Pipeline:
     )
 
 
+def get_feature_importance(model: Pipeline) -> pd.DataFrame:
+    """Return source-level Random Forest feature importance.
+
+    One-hot encoded position columns are aggregated back into one ``position``
+    row, making the output suitable for comparison with numeric features.
+    Importances describe model reliance, not causal effect.
+    """
+    if not isinstance(model, Pipeline):
+        raise ValueError("Feature importance requires the fitted model pipeline.")
+
+    try:
+        preprocessor = model.named_steps["preprocessor"]
+        regressor = model.named_steps["regressor"]
+        transformed_names = preprocessor.get_feature_names_out()
+        importances = regressor.feature_importances_
+    except (AttributeError, KeyError) as error:
+        raise ValueError(
+            "Feature importance requires a fitted pipeline produced by "
+            "build_pipeline()."
+        ) from error
+
+    if len(transformed_names) != len(importances):
+        raise ValueError(
+            "The fitted model's transformed feature names do not match its "
+            "importance values."
+        )
+
+    source_features = []
+    for name in transformed_names:
+        if name.startswith("numeric__"):
+            source_features.append(name.removeprefix("numeric__"))
+        elif name.startswith("categorical__position_"):
+            source_features.append("position")
+        else:
+            source_features.append(name)
+
+    result = pd.DataFrame(
+        {
+            "feature": source_features,
+            "importance": importances,
+        }
+    )
+
+    result = (
+        result.groupby("feature", as_index=False)["importance"]
+        .sum()
+        .sort_values("importance", ascending=False)
+        .reset_index(drop=True)
+    )
+    result["importance_pct"] = result["importance"] * 100
+
+    return result
+
+
 def train_and_evaluate(
     feature_frame: pd.DataFrame,
     validation_gameweeks: int = 8,
