@@ -10,6 +10,13 @@ PERFORMANCE_COLUMNS = [
     "expected_goal_involvements",
     "minutes",
     "starts",
+    "goals_scored",
+    "assists",
+    "clean_sheets",
+    "bonus",
+    "threat",
+    "creativity",
+    "defensive_contribution",
 ]
 
 
@@ -298,6 +305,13 @@ def build_player_gameweek_data(
         "expected_goals",
         "expected_assists",
         "expected_goal_involvements",
+        "goals_scored",
+        "assists",
+        "clean_sheets",
+        "bonus",
+        "threat",
+        "creativity",
+        "defensive_contribution",
     ]
 
     missing = [
@@ -356,6 +370,13 @@ def build_player_gameweek_data(
         "expected_goals",
         "expected_assists",
         "expected_goal_involvements",
+        "goals_scored",
+        "assists",
+        "clean_sheets",
+        "bonus",
+        "threat",
+        "creativity",
+        "defensive_contribution",
     ]
 
     for column in numeric_columns:
@@ -412,6 +433,13 @@ def build_player_gameweek_data(
         "expected_goals": "sum",
         "expected_assists": "sum",
         "expected_goal_involvements": "sum",
+        "goals_scored": "sum",
+        "assists": "sum",
+        "clean_sheets": "sum",
+        "bonus": "sum",
+        "threat": "sum",
+        "creativity": "sum",
+        "defensive_contribution": "sum",
     }
 
     grouped = (
@@ -773,6 +801,13 @@ def aggregate_player_gameweeks(df):
         "expected_goals",
         "expected_assists",
         "expected_goal_involvements",
+        "goals_scored",
+        "assists",
+        "clean_sheets",
+        "bonus",
+        "threat",
+        "creativity",
+        "defensive_contribution",
     ]
 
     missing = [
@@ -847,6 +882,13 @@ def aggregate_player_gameweeks(df):
                 "expected_goal_involvements",
                 "sum"
             ),
+            goals_scored=("goals_scored", "sum"),
+            assists=("assists", "sum"),
+            clean_sheets=("clean_sheets", "sum"),
+            bonus=("bonus", "sum"),
+            threat=("threat", "sum"),
+            creativity=("creativity", "sum"),
+            defensive_contribution=("defensive_contribution", "sum"),
             fixture_count=(
                 "fixture_id",
                 "nunique"
@@ -895,6 +937,13 @@ def _add_calendar_previous_features(df):
             "expected_goal_involvements": "xgi",
             "minutes": "minutes",
             "starts": "starts",
+            "goals_scored": "goals_scored",
+            "assists": "assists",
+            "clean_sheets": "clean_sheets",
+            "bonus": "bonus",
+            "threat": "threat",
+            "creativity": "creativity",
+            "defensive_contribution": "defensive_contribution",
         }[source_column]
 
         result[
@@ -944,6 +993,13 @@ def _build_actual_fixture_history_rollups(df):
         "expected_goal_involvements": "xgi",
         "minutes": "minutes",
         "starts": "starts",
+        "goals_scored": "goals_scored",
+        "assists": "assists",
+        "clean_sheets": "clean_sheets",
+        "bonus": "bonus",
+        "threat": "threat",
+        "creativity": "creativity",
+        "defensive_contribution": "defensive_contribution",
     }
 
     for source_column, prefix in metric_prefixes.items():
@@ -980,6 +1036,37 @@ def _build_actual_fixture_history_rollups(df):
         ] = (
             rolling_starts / rolling_fixtures
         )
+
+    # Rates prevent high-minute players from appearing more attacking simply
+    # because they played more. All inputs are shifted, so they are known at
+    # the end of the current gameweek.
+    rate_metrics = {
+        "expected_goal_involvements": "xgi",
+        "goals_scored": "goals_scored",
+        "assists": "assists",
+        "threat": "threat",
+        "creativity": "creativity",
+        "defensive_contribution": "defensive_contribution",
+    }
+
+    for window in (3, 5):
+        rolling_minutes = grouped["minutes"].transform(
+            lambda values, size=window: values.shift(1).rolling(
+                window=size,
+                min_periods=size,
+            ).sum()
+        )
+
+        for source_column, prefix in rate_metrics.items():
+            rolling_total = grouped[source_column].transform(
+                lambda values, size=window: values.shift(1).rolling(
+                    window=size,
+                    min_periods=size,
+                ).sum()
+            )
+            history[f"rolling_{window}gw_{prefix}_per_90"] = (
+                90 * rolling_total / rolling_minutes
+            ).where(rolling_minutes.gt(0))
 
     return history
 
@@ -1146,6 +1233,37 @@ def build_form_features(
 
         "next_gw_points",
     ]
+
+    additional_metric_prefixes = [
+        "goals_scored",
+        "assists",
+        "clean_sheets",
+        "bonus",
+        "threat",
+        "creativity",
+        "defensive_contribution",
+    ]
+    for prefix in additional_metric_prefixes:
+        required_feature_columns.append(f"previous_gw_{prefix}")
+        required_feature_columns.extend(
+            f"rolling_{window}gw_{prefix}"
+            for window in FEATURE_WINDOWS
+        )
+
+    required_feature_columns.extend(
+        [
+            f"rolling_{window}gw_{prefix}_per_90"
+            for window in (3, 5)
+            for prefix in (
+                "xgi",
+                "goals_scored",
+                "assists",
+                "threat",
+                "creativity",
+                "defensive_contribution",
+            )
+        ]
+    )
 
     missing = [
         column
