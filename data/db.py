@@ -309,9 +309,25 @@ PREDICTION_FEATURE_COLUMNS = (
     + ["next_gw_points"]
 )
 
+# These columns are deliberately checked before and after every rebuild.  They
+# cover player attacking output, defensive output, and fixture context without
+# logging any credentials or sensitive connection details.
+PREDICTION_FEATURE_AUDIT_COLUMNS = [
+    "previous_gw_goals_scored",
+    "rolling_3gw_goals_scored",
+    "previous_gw_clean_sheets",
+    "rolling_3gw_clean_sheets",
+    "previous_gw_threat",
+    "rolling_3gw_creativity",
+    "rolling_3gw_xgi_per_90",
+    "rolling_3gw_defensive_contribution",
+    "next_1gw_team_avg_5fixture_goals_conceded",
+    "next_1gw_opponent_avg_5fixture_goals_scored",
+]
+
 
 def save_prediction_features(features):
-    """Atomically replace feature rows for the rebuilt season(s)."""
+    """Atomically replace feature rows and verify the saved feature values."""
     missing = [
         column for column in PREDICTION_FEATURE_COLUMNS
         if column not in features.columns
@@ -329,6 +345,25 @@ def save_prediction_features(features):
     )
     if not records:
         return 0
+
+    pre_save_counts = {
+        column: sum(row[column] is not None for row in records)
+        for column in PREDICTION_FEATURE_AUDIT_COLUMNS
+    }
+    print(
+        f"DEBUG: pre-save populated feature counts = {pre_save_counts}",
+        flush=True,
+    )
+    empty_pre_save_columns = [
+        column
+        for column, count in pre_save_counts.items()
+        if count == 0
+    ]
+    if empty_pre_save_columns:
+        raise ValueError(
+            "Feature dataframe has no populated values for: "
+            f"{empty_pre_save_columns}"
+        )
 
     keys = [(row["season"], row["gameweek"], row["player_id"]) for row in records]
     if len(keys) != len(set(keys)):
@@ -355,17 +390,81 @@ def save_prediction_features(features):
         "DELETE FROM prediction_features WHERE season = :season"
     )
     seasons = sorted({row["season"] for row in records})
+    expected_rows_by_season = Counter(row["season"] for row in records)
+    audit_select_list = ", ".join(
+        ["COUNT(*) AS total_rows"]
+        + [f"COUNT({column}) AS {column}" for column in PREDICTION_FEATURE_AUDIT_COLUMNS]
+    )
+    audit_sql = text(
+        f"""
+        SELECT {audit_select_list}
+        FROM prediction_features
+        WHERE season = :season
+        """
+    )
 
     conn = get_database_connection()
     with conn.session as session:
+        committed = False
         try:
+            print(
+                f"DEBUG: replacing prediction features for seasons = {seasons}",
+                flush=True,
+            )
             for season in seasons:
                 session.execute(delete_sql, {"season": season})
+            total_batches = (len(records) + 499) // 500
             for start in range(0, len(records), 500):
+                batch_number = start // 500 + 1
+                print(
+                    f"DEBUG: inserting prediction feature batch "
+                    f"{batch_number}/{total_batches}",
+                    flush=True,
+                )
                 session.execute(insert_sql, records[start:start + 500])
             session.commit()
+            committed = True
+
+            for season in seasons:
+                audit = dict(
+                    session.execute(
+                        audit_sql,
+                        {"season": season},
+                    ).mappings().one()
+                )
+                print(
+                    f"DEBUG: post-commit feature audit for {season} = {audit}",
+                    flush=True,
+                )
+                missing_saved_columns = [
+                    column
+                    for column in PREDICTION_FEATURE_AUDIT_COLUMNS
+                    if audit[column] == 0
+                ]
+                if audit["total_rows"] != expected_rows_by_season[season]:
+                    raise RuntimeError(
+                        f"Post-commit row-count mismatch for {season}: "
+                        f"expected {expected_rows_by_season[season]}, "
+                        f"saved {audit['total_rows']}."
+                    )
+                if missing_saved_columns:
+                    raise RuntimeError(
+                        f"Post-commit audit found blank saved columns for "
+                        f"{season}: {missing_saved_columns}."
+                    )
         except Exception:
-            session.rollback()
+            if not committed:
+                session.rollback()
+                print(
+                    "DEBUG: prediction feature rebuild rolled back",
+                    flush=True,
+                )
+            else:
+                print(
+                    "DEBUG: prediction feature rebuild committed, but the "
+                    "post-commit audit failed",
+                    flush=True,
+                )
             raise
 
     return len(records)
