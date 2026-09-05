@@ -741,6 +741,59 @@ if st.button(
                 fixture_features,
             )
 
+        # Do not allow a successful-looking rebuild to save empty new fields.
+        # This is displayed before the database write for direct diagnosis.
+        new_feature_columns = [
+            "previous_gw_goals_scored",
+            "rolling_3gw_goals_scored",
+            "previous_gw_clean_sheets",
+            "rolling_3gw_clean_sheets",
+            "previous_gw_threat",
+            "rolling_3gw_creativity",
+            "rolling_3gw_xgi_per_90",
+            "rolling_3gw_defensive_contribution",
+            "next_1gw_team_avg_5fixture_goals_conceded",
+            "next_1gw_opponent_avg_5fixture_goals_scored",
+        ]
+
+        missing_new_columns = [
+            column
+            for column in new_feature_columns
+            if column not in features.columns
+        ]
+        if missing_new_columns:
+            raise ValueError(
+                "Feature build did not return required new columns: "
+                f"{missing_new_columns}"
+            )
+
+        feature_population = pd.DataFrame(
+            {
+                "feature": new_feature_columns,
+                "populated_rows": [
+                    int(features[column].notna().sum())
+                    for column in new_feature_columns
+                ],
+            }
+        )
+
+        st.subheader("New Feature Build Validation")
+        st.dataframe(
+            feature_population,
+            use_container_width=True,
+            hide_index=True,
+        )
+
+        empty_features = feature_population.loc[
+            feature_population["populated_rows"].eq(0),
+            "feature",
+        ].tolist()
+        if empty_features:
+            raise ValueError(
+                "New features are empty before database saving: "
+                f"{empty_features}"
+            )
+
         with st.spinner(
             "Saving prediction features to Supabase..."
         ):
