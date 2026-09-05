@@ -72,7 +72,6 @@ NUMERIC_FEATURE_COLUMNS = [
 ] + ADDITIONAL_PLAYER_FEATURE_COLUMNS + TEAM_CONTEXT_FEATURE_COLUMNS
 CATEGORICAL_FEATURE_COLUMNS = ["position"]
 MODEL_FEATURE_COLUMNS = NUMERIC_FEATURE_COLUMNS + CATEGORICAL_FEATURE_COLUMNS
-MIN_POSITION_TRAIN_ROWS = 500
 
 AVAILABILITY_FEATURE_COLUMNS = [
     column
@@ -125,28 +124,6 @@ class EvaluationResult:
 
     def to_dict(self) -> dict[str, Any]:
         return self.__dict__.copy()
-
-
-@dataclass
-class PositionModelBundle:
-    """One fitted model per FPL position, with a global fallback model."""
-
-    models: dict[str, Pipeline]
-    fallback_model: Pipeline
-    min_train_rows: int
-
-    def predict(self, features: pd.DataFrame) -> np.ndarray:
-        positions = features["position"].fillna("Unknown").astype(str)
-        predictions = np.zeros(len(features), dtype=float)
-
-        for position in positions.unique():
-            mask = positions.eq(position).to_numpy()
-            model = self.models.get(position, self.fallback_model)
-            predictions[mask] = model.predict(
-                features.loc[mask, MODEL_FEATURE_COLUMNS]
-            )
-
-        return predictions
 
 
 def _validate_columns(frame: pd.DataFrame, include_target: bool) -> None:
@@ -465,108 +442,6 @@ def train_and_evaluate(
     return model, evaluation, validation_results
 
 
-def _fit_position_model_bundle(
-    train: pd.DataFrame,
-    random_state: int,
-    min_train_rows: int,
-) -> PositionModelBundle:
-    """Fit a global fallback plus position-specialist candidate models."""
-    fallback_model = build_pipeline(random_state=random_state)
-    fallback_model.fit(train[MODEL_FEATURE_COLUMNS], train[TARGET_COLUMN])
-
-    models: dict[str, Pipeline] = {}
-    for offset, (position, position_rows) in enumerate(
-        train.groupby("position", sort=True)
-    ):
-        if len(position_rows) < min_train_rows:
-            continue
-        position_model = build_pipeline(random_state=random_state + offset + 1)
-        position_model.fit(
-            position_rows[MODEL_FEATURE_COLUMNS],
-            position_rows[TARGET_COLUMN],
-        )
-        models[str(position)] = position_model
-
-    return PositionModelBundle(
-        models=models,
-        fallback_model=fallback_model,
-        min_train_rows=min_train_rows,
-    )
-
-
-def train_position_specific_and_evaluate(
-    feature_frame: pd.DataFrame,
-    validation_gameweeks: int = 8,
-    random_state: int = 42,
-    min_train_rows: int = MIN_POSITION_TRAIN_ROWS,
-) -> tuple[PositionModelBundle, EvaluationResult, pd.DataFrame]:
-    """Evaluate one specialist model per position on the same temporal split."""
-    if min_train_rows < 1:
-        raise ValueError("min_train_rows must be at least 1")
-
-    frame = prepare_feature_frame(feature_frame, include_target=True)
-    train, validation, season, start_gameweek = temporal_split(
-        frame,
-        validation_gameweeks=validation_gameweeks,
-    )
-    model = _fit_position_model_bundle(
-        train,
-        random_state=random_state,
-        min_train_rows=min_train_rows,
-    )
-    predictions = np.clip(
-        model.predict(validation[MODEL_FEATURE_COLUMNS]),
-        a_min=0,
-        a_max=None,
-    )
-    actual = validation[TARGET_COLUMN].to_numpy()
-    baseline_prediction = np.full(
-        shape=len(validation),
-        fill_value=train[TARGET_COLUMN].mean(),
-    )
-    evaluation = EvaluationResult(
-        train_rows=len(train),
-        validation_rows=len(validation),
-        validation_season=season,
-        validation_start_gameweek=start_gameweek,
-        model_mae=float(mean_absolute_error(actual, predictions)),
-        model_rmse=float(np.sqrt(mean_squared_error(actual, predictions))),
-        baseline_mae=float(mean_absolute_error(actual, baseline_prediction)),
-        baseline_rmse=float(np.sqrt(mean_squared_error(actual, baseline_prediction))),
-    )
-    validation_results = validation.copy()
-    validation_results["predicted_next_gw_points"] = predictions
-    validation_results["prediction_error"] = (
-        validation_results["predicted_next_gw_points"]
-        - validation_results[TARGET_COLUMN]
-    )
-    return model, evaluation, validation_results
-
-
-def compare_model_evaluations(
-    global_evaluation: EvaluationResult,
-    position_evaluation: EvaluationResult,
-) -> pd.DataFrame:
-    """Return a compact fair comparison from identical temporal holdouts."""
-    return pd.DataFrame(
-        [
-            {
-                "model": "Global Random Forest",
-                "mae": global_evaluation.model_mae,
-                "rmse": global_evaluation.model_rmse,
-            },
-            {
-                "model": "Position-specific Random Forest",
-                "mae": position_evaluation.model_mae,
-                "rmse": position_evaluation.model_rmse,
-            },
-        ]
-    ).assign(
-        mae_change_vs_global=lambda result: result["mae"]
-        - global_evaluation.model_mae
-    )
-
-
 def train_final_model(
     feature_frame: pd.DataFrame,
     random_state: int = 42,
@@ -576,20 +451,6 @@ def train_final_model(
     model = build_pipeline(random_state=random_state)
     model.fit(frame[MODEL_FEATURE_COLUMNS], frame[TARGET_COLUMN])
     return model
-
-
-def train_final_position_specific_model(
-    feature_frame: pd.DataFrame,
-    random_state: int = 42,
-    min_train_rows: int = MIN_POSITION_TRAIN_ROWS,
-) -> PositionModelBundle:
-    """Fit the position-specialist candidate using every completed row."""
-    frame = prepare_feature_frame(feature_frame, include_target=True)
-    return _fit_position_model_bundle(
-        frame,
-        random_state=random_state,
-        min_train_rows=min_train_rows,
-    )
 
 
 def save_model(
@@ -621,7 +482,7 @@ def load_model(path: str | Path) -> dict[str, Any]:
 
 
 def predict_next_gameweek(
-    model: Pipeline | PositionModelBundle,
+    model: Pipeline,
     feature_frame: pd.DataFrame,
 ) -> pd.DataFrame:
     """Score feature rows without using their known historical target."""
