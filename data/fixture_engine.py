@@ -394,4 +394,14 @@ def attach_fixture_features(prediction_features, fixture_features):
             "Some prediction rows have no matching fixture features."
         )
 
+    if "expected_minutes_per_fixture" not in result.columns:
+        raise ValueError(
+            "Prediction features are missing expected_minutes_per_fixture."
+        )
+
+    result["expected_minutes_next_gw"] = (
+        pd.to_numeric(result["expected_minutes_per_fixture"], errors="coerce")
+        * pd.to_numeric(result["next_1gw_fixture_count"], errors="coerce")
+    )
+
     return result
