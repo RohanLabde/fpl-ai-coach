@@ -14,7 +14,7 @@ import joblib
 import numpy as np
 import pandas as pd
 from sklearn.compose import ColumnTransformer
-from sklearn.ensemble import HistGradientBoostingRegressor, RandomForestRegressor
+from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.impute import SimpleImputer
 from sklearn.inspection import permutation_importance
 from sklearn.metrics import mean_absolute_error, mean_squared_error
@@ -23,7 +23,6 @@ from sklearn.preprocessing import OneHotEncoder
 
 
 TARGET_COLUMN = "next_gw_points"
-RANDOM_FOREST_MODEL_NAME = "Random Forest"
 GRADIENT_BOOSTING_MODEL_NAME = "Gradient Boosting"
 IDENTIFIER_COLUMNS = ["season", "gameweek", "player_id", "player_name", "team_id", "team_name"]
 ADDITIONAL_PLAYER_METRICS = [
@@ -197,53 +196,12 @@ def temporal_split(
     return train, validation, validation_season, validation_start_gameweek
 
 
-def build_random_forest_pipeline(random_state: int = 42) -> Pipeline:
-    """Build the production Random Forest candidate."""
-    preprocessor = ColumnTransformer(
-        transformers=[
-            (
-                "numeric",
-                Pipeline(
-                    steps=[("imputer", SimpleImputer(strategy="median"))]
-                ),
-                NUMERIC_FEATURE_COLUMNS,
-            ),
-            (
-                "categorical",
-                Pipeline(
-                    steps=[
-                        ("imputer", SimpleImputer(strategy="most_frequent")),
-                        ("encoder", OneHotEncoder(handle_unknown="ignore")),
-                    ]
-                ),
-                CATEGORICAL_FEATURE_COLUMNS,
-            ),
-        ],
-        remainder="drop",
-    )
-
-    regressor = RandomForestRegressor(
-        n_estimators=400,
-        min_samples_leaf=5,
-        max_features=0.8,
-        n_jobs=-1,
-        random_state=random_state,
-    )
-
-    return Pipeline(
-        steps=[
-            ("preprocessor", preprocessor),
-            ("regressor", regressor),
-        ]
-    )
-
-
 def build_gradient_boosting_pipeline(random_state: int = 42) -> Pipeline:
     """Build a dense-input Histogram Gradient Boosting candidate.
 
     Gradient boosting learns sequentially: each tree focuses on errors left by
-    the earlier trees.  Its preprocessing is deliberately separate from the
-    Random Forest pipeline because HistGradientBoosting requires dense input.
+    the earlier trees. Its preprocessing produces dense input, as required by
+    HistGradientBoosting.
     """
     preprocessor = ColumnTransformer(
         transformers=[
@@ -291,60 +249,6 @@ def build_gradient_boosting_pipeline(random_state: int = 42) -> Pipeline:
     )
 
 
-def get_feature_importance(model: Pipeline) -> pd.DataFrame:
-    """Return source-level Random Forest feature importance.
-
-    One-hot encoded position columns are aggregated back into one ``position``
-    row, making the output suitable for comparison with numeric features.
-    Importances describe model reliance, not causal effect.
-    """
-    if not isinstance(model, Pipeline):
-        raise ValueError("Feature importance requires the fitted model pipeline.")
-
-    try:
-        preprocessor = model.named_steps["preprocessor"]
-        regressor = model.named_steps["regressor"]
-        transformed_names = preprocessor.get_feature_names_out()
-        importances = regressor.feature_importances_
-    except (AttributeError, KeyError) as error:
-        raise ValueError(
-            "Feature importance requires a fitted pipeline produced by "
-            "build_random_forest_pipeline()."
-        ) from error
-
-    if len(transformed_names) != len(importances):
-        raise ValueError(
-            "The fitted model's transformed feature names do not match its "
-            "importance values."
-        )
-
-    source_features = []
-    for name in transformed_names:
-        if name.startswith("numeric__"):
-            source_features.append(name.removeprefix("numeric__"))
-        elif name.startswith("categorical__position_"):
-            source_features.append("position")
-        else:
-            source_features.append(name)
-
-    result = pd.DataFrame(
-        {
-            "feature": source_features,
-            "importance": importances,
-        }
-    )
-
-    result = (
-        result.groupby("feature", as_index=False)["importance"]
-        .sum()
-        .sort_values("importance", ascending=False)
-        .reset_index(drop=True)
-    )
-    result["importance_pct"] = result["importance"] * 100
-
-    return result
-
-
 def get_permutation_importance(
     model: Pipeline,
     validation_frame: pd.DataFrame,
@@ -353,9 +257,8 @@ def get_permutation_importance(
 ) -> pd.DataFrame:
     """Measure held-out feature value using MAE degradation when shuffled.
 
-    Unlike impurity-based Random Forest importance, this is evaluated on data
-    the model did not train on and is less biased toward high-cardinality,
-    correlated inputs such as raw minutes.
+    This is evaluated on data the model did not train on and measures the MAE
+    cost of disrupting one input at a time.
     """
     if repeats < 1:
         raise ValueError("Permutation repeats must be at least 1")
@@ -504,21 +407,7 @@ def train_and_evaluate(
     validation_gameweeks: int = 8,
     random_state: int = 42,
 ) -> tuple[Pipeline, EvaluationResult, pd.DataFrame]:
-    """Train and temporally evaluate the Random Forest candidate."""
-    return _fit_and_evaluate(
-        feature_frame,
-        model=build_random_forest_pipeline(random_state=random_state),
-        model_name=RANDOM_FOREST_MODEL_NAME,
-        validation_gameweeks=validation_gameweeks,
-    )
-
-
-def train_gradient_boosting_and_evaluate(
-    feature_frame: pd.DataFrame,
-    validation_gameweeks: int = 8,
-    random_state: int = 42,
-) -> tuple[Pipeline, EvaluationResult, pd.DataFrame]:
-    """Train and temporally evaluate the Gradient Boosting candidate."""
+    """Train and temporally evaluate the production Gradient Boosting model."""
     return _fit_and_evaluate(
         feature_frame,
         model=build_gradient_boosting_pipeline(random_state=random_state),
@@ -527,43 +416,13 @@ def train_gradient_boosting_and_evaluate(
     )
 
 
-def compare_model_evaluations(
-    random_forest: EvaluationResult,
-    gradient_boosting: EvaluationResult,
-) -> pd.DataFrame:
-    """Compare candidates from the identical temporal holdout."""
-    return pd.DataFrame(
-        [
-            {
-                "model": random_forest.model_name,
-                "mae": random_forest.model_mae,
-                "rmse": random_forest.model_rmse,
-            },
-            {
-                "model": gradient_boosting.model_name,
-                "mae": gradient_boosting.model_mae,
-                "rmse": gradient_boosting.model_rmse,
-            },
-        ]
-    ).assign(
-        mae_change_vs_random_forest=lambda result: result["mae"]
-        - random_forest.model_mae
-    )
-
-
 def train_final_model(
     feature_frame: pd.DataFrame,
-    model_name: str = RANDOM_FOREST_MODEL_NAME,
     random_state: int = 42,
 ) -> Pipeline:
-    """Fit the evaluated production candidate using every labelled row."""
+    """Fit the production Gradient Boosting model using every labelled row."""
     frame = prepare_feature_frame(feature_frame, include_target=True)
-    if model_name == RANDOM_FOREST_MODEL_NAME:
-        model = build_random_forest_pipeline(random_state=random_state)
-    elif model_name == GRADIENT_BOOSTING_MODEL_NAME:
-        model = build_gradient_boosting_pipeline(random_state=random_state)
-    else:
-        raise ValueError(f"Unsupported model name: {model_name}")
+    model = build_gradient_boosting_pipeline(random_state=random_state)
     model.fit(frame[MODEL_FEATURE_COLUMNS], frame[TARGET_COLUMN])
     return model
 
