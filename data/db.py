@@ -1,4 +1,5 @@
 import streamlit as st
+import pandas as pd
 from sqlalchemy import text
 from collections import Counter
 
@@ -261,7 +262,116 @@ def save_historical_data(records):
     return total
 
 
+# The new implementation is deliberately column-driven: adding a feature only
+# requires updating this one source of truth, avoiding mismatched INSERT,
+# VALUES, and ON CONFLICT lists.
+_CORE_PREDICTION_FEATURE_COLUMNS = [
+    "season", "gameweek", "player_id", "player_name", "position",
+    "team_id", "team_name",
+    "next_1gw_fixture_count", "next_1gw_avg_fdr",
+    "next_1gw_home_count", "next_1gw_away_count",
+    "next_1gw_opponent_avg_5fixture_goals_conceded",
+    "next_1gw_opponent_avg_5fixture_clean_sheet_rate",
+    "next_1gw_team_avg_5fixture_goals_conceded",
+    "next_1gw_team_avg_5fixture_clean_sheet_rate",
+    "next_1gw_opponent_avg_5fixture_goals_scored",
+    "previous_gw_points", "rolling_3gw_points", "rolling_5gw_points",
+    "rolling_10gw_points", "previous_gw_xg", "rolling_3gw_xg",
+    "rolling_5gw_xg", "rolling_10gw_xg", "previous_gw_xa",
+    "rolling_3gw_xa", "rolling_5gw_xa", "rolling_10gw_xa",
+    "previous_gw_xgi", "rolling_3gw_xgi", "rolling_5gw_xgi",
+    "rolling_10gw_xgi", "previous_gw_minutes", "rolling_3gw_minutes",
+    "rolling_5gw_minutes", "rolling_10gw_minutes", "previous_gw_starts",
+    "rolling_3gw_starts", "rolling_5gw_starts", "rolling_10gw_starts",
+    "rolling_3gw_start_rate", "rolling_5gw_start_rate",
+    "rolling_10gw_start_rate", "next_gw_points",
+]
+_PLAYER_CONTEXT_METRICS = [
+    "goals_scored", "assists", "clean_sheets", "bonus", "threat",
+    "creativity", "defensive_contribution",
+]
+_PLAYER_CONTEXT_FEATURE_COLUMNS = [
+    f"previous_gw_{metric}" for metric in _PLAYER_CONTEXT_METRICS
+] + [
+    f"rolling_{window}gw_{metric}"
+    for metric in _PLAYER_CONTEXT_METRICS for window in (3, 5, 10)
+] + [
+    f"rolling_{window}gw_{metric}_per_90"
+    for window in (3, 5)
+    for metric in (
+        "xgi", "goals_scored", "assists", "threat", "creativity",
+        "defensive_contribution",
+    )
+]
+PREDICTION_FEATURE_COLUMNS = (
+    _CORE_PREDICTION_FEATURE_COLUMNS[:-1]
+    + _PLAYER_CONTEXT_FEATURE_COLUMNS
+    + ["next_gw_points"]
+)
+
+
 def save_prediction_features(features):
+    """Atomically replace feature rows for the rebuilt season(s)."""
+    missing = [
+        column for column in PREDICTION_FEATURE_COLUMNS
+        if column not in features.columns
+    ]
+    if missing:
+        raise ValueError(
+            f"Prediction features are missing database columns: {missing}"
+        )
+
+    records = (
+        features[PREDICTION_FEATURE_COLUMNS]
+        .astype(object)
+        .where(pd.notna(features[PREDICTION_FEATURE_COLUMNS]), None)
+        .to_dict(orient="records")
+    )
+    if not records:
+        return 0
+
+    keys = [(row["season"], row["gameweek"], row["player_id"]) for row in records]
+    if len(keys) != len(set(keys)):
+        raise ValueError(
+            "Feature dataframe contains duplicate (season, gameweek, player_id) keys."
+        )
+
+    column_sql = ", ".join(PREDICTION_FEATURE_COLUMNS)
+    value_sql = ", ".join(f":{column}" for column in PREDICTION_FEATURE_COLUMNS)
+    update_sql = ", ".join(
+        f"{column} = EXCLUDED.{column}"
+        for column in PREDICTION_FEATURE_COLUMNS
+        if column not in {"season", "gameweek", "player_id"}
+    )
+    insert_sql = text(
+        f"""
+        INSERT INTO prediction_features ({column_sql})
+        VALUES ({value_sql})
+        ON CONFLICT (season, gameweek, player_id)
+        DO UPDATE SET {update_sql}
+        """
+    )
+    delete_sql = text(
+        "DELETE FROM prediction_features WHERE season = :season"
+    )
+    seasons = sorted({row["season"] for row in records})
+
+    conn = get_database_connection()
+    with conn.session as session:
+        try:
+            for season in seasons:
+                session.execute(delete_sql, {"season": season})
+            for start in range(0, len(records), 500):
+                session.execute(insert_sql, records[start:start + 500])
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+
+    return len(records)
+
+
+def _save_prediction_features_legacy(features):
 
     conn = get_database_connection()
 
