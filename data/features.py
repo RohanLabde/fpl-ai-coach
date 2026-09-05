@@ -959,6 +959,16 @@ def _add_calendar_previous_features(df):
             .shift(1)
         )
 
+    previous_minutes = calendar_values["minutes"].groupby(
+        [result["season"], result["player_id"]]
+    )
+    result["previous_gw_played"] = previous_minutes.transform(
+        lambda values: values.gt(0).shift(1)
+    )
+    result["previous_gw_60_minute_appearance"] = previous_minutes.transform(
+        lambda values: values.ge(60).shift(1)
+    )
+
     return result
 
 
@@ -1037,6 +1047,49 @@ def _build_actual_fixture_history_rollups(df):
             rolling_starts / rolling_fixtures
         )
 
+        rolling_minutes_total = grouped["minutes"].transform(
+            lambda values, size=window:
+                values.shift(1).rolling(
+                    window=size,
+                    min_periods=size,
+                ).sum()
+        )
+        history[f"rolling_{window}gw_minutes_per_fixture"] = (
+            rolling_minutes_total / rolling_fixtures
+        )
+        history[f"rolling_{window}gw_play_rate"] = grouped["minutes"].transform(
+            lambda values, size=window:
+                values.gt(0).shift(1).rolling(
+                    window=size,
+                    min_periods=size,
+                ).mean()
+        )
+        history[
+            f"rolling_{window}gw_60_minute_appearance_rate"
+        ] = grouped["minutes"].transform(
+            lambda values, size=window:
+                values.ge(60).shift(1).rolling(
+                    window=size,
+                    min_periods=size,
+                ).mean()
+        )
+
+    # These availability signals combine recent selection behaviour with a
+    # longer baseline. They are known before the next gameweek begins.
+    history["minutes_trend_3gw_vs_10gw"] = (
+        history["rolling_3gw_minutes_per_fixture"]
+        - history["rolling_10gw_minutes_per_fixture"]
+    )
+    history["start_rate_trend_3gw_vs_10gw"] = (
+        history["rolling_3gw_start_rate"]
+        - history["rolling_10gw_start_rate"]
+    )
+    history["expected_minutes_per_fixture"] = (
+        0.55 * history["rolling_3gw_minutes_per_fixture"]
+        + 0.30 * history["rolling_5gw_minutes_per_fixture"]
+        + 0.15 * history["rolling_10gw_minutes_per_fixture"]
+    )
+
     # Rates prevent high-minute players from appearing more attacking simply
     # because they played more. All inputs are shifted, so they are known at
     # the end of the current gameweek.
@@ -1106,6 +1159,12 @@ def build_form_features(
         for column in history.columns
         if column.startswith("rolling_")
     ]
+    derived_availability_columns = [
+        "minutes_trend_3gw_vs_10gw",
+        "start_rate_trend_3gw_vs_10gw",
+        "expected_minutes_per_fixture",
+    ]
+    history_feature_columns = rolling_columns + derived_availability_columns
 
     df = df.merge(
         history[
@@ -1113,7 +1172,7 @@ def build_form_features(
                 "season",
                 "gameweek",
                 "player_id",
-            ] + rolling_columns
+            ] + history_feature_columns
         ],
         on=[
             "season",
@@ -1134,16 +1193,16 @@ def build_form_features(
         .groupby(
             ["season", "player_id"],
             group_keys=False
-        )[rolling_columns]
+        )[history_feature_columns]
         .bfill()
     )
 
     df.loc[
         blank_mask,
-        rolling_columns
+        history_feature_columns
     ] = next_fixture_rollups.loc[
         blank_mask,
-        rolling_columns
+        history_feature_columns
     ]
     target_source = (
         df["total_points"]
@@ -1218,6 +1277,8 @@ def build_form_features(
         "rolling_10gw_xgi",
 
         "previous_gw_minutes",
+        "previous_gw_played",
+        "previous_gw_60_minute_appearance",
         "rolling_3gw_minutes",
         "rolling_5gw_minutes",
         "rolling_10gw_minutes",
@@ -1230,6 +1291,19 @@ def build_form_features(
         "rolling_3gw_start_rate",
         "rolling_5gw_start_rate",
         "rolling_10gw_start_rate",
+
+        "rolling_3gw_minutes_per_fixture",
+        "rolling_5gw_minutes_per_fixture",
+        "rolling_10gw_minutes_per_fixture",
+        "rolling_3gw_play_rate",
+        "rolling_5gw_play_rate",
+        "rolling_10gw_play_rate",
+        "rolling_3gw_60_minute_appearance_rate",
+        "rolling_5gw_60_minute_appearance_rate",
+        "rolling_10gw_60_minute_appearance_rate",
+        "minutes_trend_3gw_vs_10gw",
+        "start_rate_trend_3gw_vs_10gw",
+        "expected_minutes_per_fixture",
 
         "next_gw_points",
     ]
