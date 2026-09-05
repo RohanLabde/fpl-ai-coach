@@ -3,6 +3,9 @@ import pandas as pd
 
 from data.model import (
     get_feature_importance,
+    get_grouped_permutation_importance,
+    get_permutation_importance,
+    get_position_validation,
     predict_next_gameweek,
     train_and_evaluate,
     train_final_model,
@@ -911,11 +914,25 @@ if st.button("Train and evaluate next-GW model", type="primary"):
             # This version is for future scoring after evaluation is complete.
             production_model = train_final_model(training_features)
             feature_importance = get_feature_importance(evaluation_model)
+            permutation_results = get_permutation_importance(
+                evaluation_model,
+                validation_results,
+            )
+            grouped_permutation_results = get_grouped_permutation_importance(
+                evaluation_model,
+                validation_results,
+            )
+            position_validation = get_position_validation(validation_results)
 
         st.session_state["fpl_production_model"] = production_model
         st.session_state["fpl_validation_results"] = validation_results
         st.session_state["fpl_model_evaluation"] = evaluation.to_dict()
         st.session_state["fpl_feature_importance"] = feature_importance
+        st.session_state["fpl_permutation_importance"] = permutation_results
+        st.session_state["fpl_grouped_permutation_importance"] = (
+            grouped_permutation_results
+        )
+        st.session_state["fpl_position_validation"] = position_validation
         st.session_state["fpl_training_features"] = training_features
 
         st.success("Model trained and temporally evaluated.")
@@ -952,8 +969,9 @@ if "fpl_model_evaluation" in st.session_state:
     if "fpl_feature_importance" in st.session_state:
         st.subheader("Model Feature Importance")
         st.caption(
-            "Importance shows how much the fitted Random Forest relied on "
-            "each input. It is not a measure of cause and effect."
+            "This Random Forest split-based view can overstate correlated "
+            "continuous features such as minutes. Use the held-out "
+            "permutation results below as the primary comparison."
         )
 
         feature_importance = st.session_state["fpl_feature_importance"].copy()
@@ -980,6 +998,90 @@ if "fpl_model_evaluation" in st.session_state:
             },
         )
 
+    if "fpl_permutation_importance" in st.session_state:
+        st.subheader("Held-out Permutation Importance")
+        st.caption(
+            "Each feature is shuffled on unseen gameweeks. A larger positive "
+            "MAE increase means the model loses more accuracy without it."
+        )
+        permutation_results = st.session_state[
+            "fpl_permutation_importance"
+        ].copy()
+        top_permutation_results = permutation_results.head(20)
+        st.bar_chart(
+            top_permutation_results.set_index("feature")["mae_increase"],
+            horizontal=True,
+        )
+        st.dataframe(
+            top_permutation_results,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "mae_increase": st.column_config.NumberColumn(
+                    "Held-out MAE increase",
+                    format="%.4f",
+                ),
+                "mae_increase_std": st.column_config.NumberColumn(
+                    "Variation across shuffles",
+                    format="%.4f",
+                ),
+            },
+        )
+
+    if "fpl_grouped_permutation_importance" in st.session_state:
+        st.subheader("Feature Group Impact")
+        st.caption(
+            "Related features are shuffled together. This shows whether "
+            "availability, attacking data, defensive data, or fixture context "
+            "matters most on the holdout period."
+        )
+        grouped_results = st.session_state[
+            "fpl_grouped_permutation_importance"
+        ].copy()
+        st.bar_chart(
+            grouped_results.set_index("feature_group")["mae_increase"],
+            horizontal=True,
+        )
+        st.dataframe(
+            grouped_results,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "mae_increase": st.column_config.NumberColumn(
+                    "Held-out MAE increase",
+                    format="%.4f",
+                ),
+                "mae_increase_std": st.column_config.NumberColumn(
+                    "Variation across shuffles",
+                    format="%.4f",
+                ),
+            },
+        )
+
+    if "fpl_position_validation" in st.session_state:
+        st.subheader("Position-by-Position Validation")
+        st.caption(
+            "Accuracy is reported separately for each FPL position, so a good "
+            "overall score cannot hide weaker defender or attacker predictions."
+        )
+        st.dataframe(
+            st.session_state["fpl_position_validation"],
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "mae": st.column_config.NumberColumn("MAE", format="%.3f"),
+                "rmse": st.column_config.NumberColumn("RMSE", format="%.3f"),
+                "actual_points_per_gw": st.column_config.NumberColumn(
+                    "Actual points / GW",
+                    format="%.3f",
+                ),
+                "predicted_points_per_gw": st.column_config.NumberColumn(
+                    "Predicted points / GW",
+                    format="%.3f",
+                ),
+            },
+        )
+
     st.subheader("Held-out Predictions")
 
     validation_results = st.session_state["fpl_validation_results"].copy()
@@ -987,8 +1089,22 @@ if "fpl_model_evaluation" in st.session_state:
         "prediction_error"
     ].abs()
 
+    held_out_display_columns = [
+        "season",
+        "gameweek",
+        "player_id",
+        "player_name",
+        "position",
+        "team_id",
+        "team_name",
+        "next_gw_points",
+        "predicted_next_gw_points",
+        "prediction_error",
+        "absolute_error",
+    ]
+
     st.dataframe(
-        validation_results.sort_values(
+        validation_results[held_out_display_columns].sort_values(
             "absolute_error",
             ascending=False,
         ),
