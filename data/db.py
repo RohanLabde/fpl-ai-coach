@@ -284,7 +284,17 @@ _CORE_PREDICTION_FEATURE_COLUMNS = [
     "rolling_5gw_minutes", "rolling_10gw_minutes", "previous_gw_starts",
     "rolling_3gw_starts", "rolling_5gw_starts", "rolling_10gw_starts",
     "rolling_3gw_start_rate", "rolling_5gw_start_rate",
-    "rolling_10gw_start_rate", "next_gw_points",
+    "rolling_10gw_start_rate", "previous_gw_played",
+    "previous_gw_60_minute_appearance",
+    "rolling_3gw_minutes_per_fixture", "rolling_5gw_minutes_per_fixture",
+    "rolling_10gw_minutes_per_fixture", "rolling_3gw_play_rate",
+    "rolling_5gw_play_rate", "rolling_10gw_play_rate",
+    "rolling_3gw_60_minute_appearance_rate",
+    "rolling_5gw_60_minute_appearance_rate",
+    "rolling_10gw_60_minute_appearance_rate",
+    "minutes_trend_3gw_vs_10gw", "start_rate_trend_3gw_vs_10gw",
+    "expected_minutes_per_fixture", "expected_minutes_next_gw",
+    "next_gw_points",
 ]
 _PLAYER_CONTEXT_METRICS = [
     "goals_scored", "assists", "clean_sheets", "bonus", "threat",
@@ -323,6 +333,8 @@ PREDICTION_FEATURE_AUDIT_COLUMNS = [
     "rolling_3gw_defensive_contribution",
     "next_1gw_team_avg_5fixture_goals_conceded",
     "next_1gw_opponent_avg_5fixture_goals_scored",
+    "expected_minutes_per_fixture",
+    "expected_minutes_next_gw",
 ]
 
 
