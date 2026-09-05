@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 
 from data.model import (
+    compare_model_evaluations,
     get_feature_importance,
     get_grouped_permutation_importance,
     get_permutation_importance,
@@ -9,6 +10,8 @@ from data.model import (
     predict_next_gameweek,
     train_and_evaluate,
     train_final_model,
+    train_final_position_specific_model,
+    train_position_specific_and_evaluate,
 )
 
 from data.fixture_engine import (
@@ -51,6 +54,7 @@ HISTORICAL_2025_26_URL = (
 )
 
 HISTORICAL_SEASON = "2025-26"
+POSITION_MODEL_MINIMUM_MAE_IMPROVEMENT = 0.01
 
 
 st.set_page_config(
@@ -904,29 +908,62 @@ if st.button("Train and evaluate next-GW model", type="primary"):
             )
 
         with st.spinner("Training on earlier gameweeks and evaluating later ones..."):
-            evaluation_model, evaluation, validation_results = (
+            global_evaluation_model, global_evaluation, global_validation_results = (
                 train_and_evaluate(
                     training_features,
                     validation_gameweeks=validation_gameweeks,
                 )
             )
+            (
+                position_evaluation_model,
+                position_evaluation,
+                position_validation_results,
+            ) = train_position_specific_and_evaluate(
+                training_features,
+                validation_gameweeks=validation_gameweeks,
+            )
+            model_comparison = compare_model_evaluations(
+                global_evaluation,
+                position_evaluation,
+            )
+            use_position_model = (
+                position_evaluation.model_mae
+                <= global_evaluation.model_mae
+                - POSITION_MODEL_MINIMUM_MAE_IMPROVEMENT
+            )
 
-            # This version is for future scoring after evaluation is complete.
-            production_model = train_final_model(training_features)
-            feature_importance = get_feature_importance(evaluation_model)
+            # Keep the global model's diagnostics comparable across runs.  The
+            # position-specialist candidate is selected only when it clears a
+            # meaningful held-out MAE improvement threshold.
+            feature_importance = get_feature_importance(global_evaluation_model)
             permutation_results = get_permutation_importance(
-                evaluation_model,
-                validation_results,
+                global_evaluation_model,
+                global_validation_results,
             )
             grouped_permutation_results = get_grouped_permutation_importance(
-                evaluation_model,
-                validation_results,
+                global_evaluation_model,
+                global_validation_results,
             )
+            if use_position_model:
+                production_model = train_final_position_specific_model(
+                    training_features
+                )
+                evaluation = position_evaluation
+                validation_results = position_validation_results
+                selected_model_name = "Position-specific Random Forest"
+            else:
+                production_model = train_final_model(training_features)
+                evaluation = global_evaluation
+                validation_results = global_validation_results
+                selected_model_name = "Global Random Forest"
+
             position_validation = get_position_validation(validation_results)
 
         st.session_state["fpl_production_model"] = production_model
         st.session_state["fpl_validation_results"] = validation_results
         st.session_state["fpl_model_evaluation"] = evaluation.to_dict()
+        st.session_state["fpl_model_comparison"] = model_comparison
+        st.session_state["fpl_selected_model_name"] = selected_model_name
         st.session_state["fpl_feature_importance"] = feature_importance
         st.session_state["fpl_permutation_importance"] = permutation_results
         st.session_state["fpl_grouped_permutation_importance"] = (
@@ -935,7 +972,7 @@ if st.button("Train and evaluate next-GW model", type="primary"):
         st.session_state["fpl_position_validation"] = position_validation
         st.session_state["fpl_training_features"] = training_features
 
-        st.success("Model trained and temporally evaluated.")
+        st.success(f"{selected_model_name} selected after temporal evaluation.")
 
     except Exception as error:
         st.error(f"Model training failed: {error}")
@@ -949,6 +986,10 @@ if "fpl_model_evaluation" in st.session_state:
         f"Held out {evaluation['validation_rows']:,} rows from "
         f"{evaluation['validation_season']} gameweek "
         f"{evaluation['validation_start_gameweek']} onward."
+    )
+    st.caption(
+        f"Production candidate selected: "
+        f"**{st.session_state.get('fpl_selected_model_name', 'Global Random Forest')}**"
     )
 
     metric_1, metric_2, metric_3, metric_4 = st.columns(4)
@@ -966,10 +1007,32 @@ if "fpl_model_evaluation" in st.session_state:
             "transfer decisions until features or model selection improve."
         )
 
+    if "fpl_model_comparison" in st.session_state:
+        st.subheader("Global vs Position-specific Model")
+        st.caption(
+            "Both candidates use exactly the same temporal holdout. The "
+            "position-specific candidate is adopted only if its MAE improves "
+            "by at least 0.010."
+        )
+        st.dataframe(
+            st.session_state["fpl_model_comparison"],
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "mae": st.column_config.NumberColumn("MAE", format="%.3f"),
+                "rmse": st.column_config.NumberColumn("RMSE", format="%.3f"),
+                "mae_change_vs_global": st.column_config.NumberColumn(
+                    "MAE change vs global",
+                    format="%+.4f",
+                ),
+            },
+        )
+
     if "fpl_feature_importance" in st.session_state:
         st.subheader("Model Feature Importance")
         st.caption(
-            "This Random Forest split-based view can overstate correlated "
+            "These diagnostics describe the global Random Forest benchmark. "
+            "Its split-based view can overstate correlated "
             "continuous features such as minutes. Use the held-out "
             "permutation results below as the primary comparison."
         )
