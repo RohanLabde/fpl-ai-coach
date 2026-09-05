@@ -7,8 +7,10 @@ from data.model import (
     get_permutation_importance,
     get_position_validation,
     predict_next_gameweek,
+    compare_model_evaluations,
     train_and_evaluate,
     train_final_model,
+    train_gradient_boosting_and_evaluate,
 )
 
 from data.fixture_engine import (
@@ -51,6 +53,7 @@ HISTORICAL_2025_26_URL = (
 )
 
 HISTORICAL_SEASON = "2025-26"
+GRADIENT_BOOSTING_MINIMUM_MAE_IMPROVEMENT = 0.01
 
 
 st.set_page_config(
@@ -904,13 +907,43 @@ if st.button("Train and evaluate next-GW model", type="primary"):
             )
 
         with st.spinner("Training on earlier gameweeks and evaluating later ones..."):
-            evaluation_model, evaluation, validation_results = (
+            random_forest_model, random_forest_evaluation, random_forest_results = (
                 train_and_evaluate(
                     training_features,
                     validation_gameweeks=validation_gameweeks,
                 )
             )
-            feature_importance = get_feature_importance(evaluation_model)
+            (
+                gradient_boosting_model,
+                gradient_boosting_evaluation,
+                gradient_boosting_results,
+            ) = train_gradient_boosting_and_evaluate(
+                training_features,
+                validation_gameweeks=validation_gameweeks,
+            )
+            model_comparison = compare_model_evaluations(
+                random_forest_evaluation,
+                gradient_boosting_evaluation,
+            )
+            use_gradient_boosting = (
+                gradient_boosting_evaluation.model_mae
+                <= random_forest_evaluation.model_mae
+                - GRADIENT_BOOSTING_MINIMUM_MAE_IMPROVEMENT
+            )
+            if use_gradient_boosting:
+                selected_model_name = gradient_boosting_evaluation.model_name
+                evaluation = gradient_boosting_evaluation
+                validation_results = gradient_boosting_results
+                evaluation_model = gradient_boosting_model
+            else:
+                selected_model_name = random_forest_evaluation.model_name
+                evaluation = random_forest_evaluation
+                validation_results = random_forest_results
+                evaluation_model = random_forest_model
+
+            # Split-based feature importance is a Random Forest-only measure.
+            # Permutation diagnostics below always describe the selected model.
+            feature_importance = get_feature_importance(random_forest_model)
             permutation_results = get_permutation_importance(
                 evaluation_model,
                 validation_results,
@@ -919,12 +952,17 @@ if st.button("Train and evaluate next-GW model", type="primary"):
                 evaluation_model,
                 validation_results,
             )
-            production_model = train_final_model(training_features)
+            production_model = train_final_model(
+                training_features,
+                model_name=selected_model_name,
+            )
             position_validation = get_position_validation(validation_results)
 
         st.session_state["fpl_production_model"] = production_model
         st.session_state["fpl_validation_results"] = validation_results
         st.session_state["fpl_model_evaluation"] = evaluation.to_dict()
+        st.session_state["fpl_model_comparison"] = model_comparison
+        st.session_state["fpl_selected_model_name"] = selected_model_name
         st.session_state["fpl_feature_importance"] = feature_importance
         st.session_state["fpl_permutation_importance"] = permutation_results
         st.session_state["fpl_grouped_permutation_importance"] = (
@@ -933,7 +971,7 @@ if st.button("Train and evaluate next-GW model", type="primary"):
         st.session_state["fpl_position_validation"] = position_validation
         st.session_state["fpl_training_features"] = training_features
 
-        st.success("Global Random Forest trained and temporally evaluated.")
+        st.success(f"{selected_model_name} selected after temporal evaluation.")
 
     except Exception as error:
         st.error(f"Model training failed: {error}")
@@ -947,6 +985,10 @@ if "fpl_model_evaluation" in st.session_state:
         f"Held out {evaluation['validation_rows']:,} rows from "
         f"{evaluation['validation_season']} gameweek "
         f"{evaluation['validation_start_gameweek']} onward."
+    )
+    st.caption(
+        f"Production candidate selected: "
+        f"**{st.session_state.get('fpl_selected_model_name', 'Random Forest')}**"
     )
 
     metric_1, metric_2, metric_3, metric_4 = st.columns(4)
@@ -964,8 +1006,28 @@ if "fpl_model_evaluation" in st.session_state:
             "transfer decisions until features or model selection improve."
         )
 
+    if "fpl_model_comparison" in st.session_state:
+        st.subheader("Random Forest vs Gradient Boosting")
+        st.caption(
+            "Both models use the same temporal holdout. Gradient Boosting is "
+            "adopted only when it improves MAE by at least 0.010."
+        )
+        st.dataframe(
+            st.session_state["fpl_model_comparison"],
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "mae": st.column_config.NumberColumn("MAE", format="%.3f"),
+                "rmse": st.column_config.NumberColumn("RMSE", format="%.3f"),
+                "mae_change_vs_random_forest": st.column_config.NumberColumn(
+                    "MAE change vs Random Forest",
+                    format="%+.4f",
+                ),
+            },
+        )
+
     if "fpl_feature_importance" in st.session_state:
-        st.subheader("Model Feature Importance")
+        st.subheader("Random Forest Feature Importance")
         st.caption(
             "This split-based Random Forest view can overstate correlated "
             "continuous features such as minutes. Use the held-out "
