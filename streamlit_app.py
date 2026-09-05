@@ -756,6 +756,8 @@ if st.button(
             "rolling_3gw_defensive_contribution",
             "next_1gw_team_avg_5fixture_goals_conceded",
             "next_1gw_opponent_avg_5fixture_goals_scored",
+            "expected_minutes_per_fixture",
+            "expected_minutes_next_gw",
         ]
 
         missing_new_columns = [
