@@ -273,7 +273,9 @@ def build_gradient_boosting_pipeline(random_state: int = 42) -> Pipeline:
         sparse_threshold=0,
     )
     regressor = HistGradientBoostingRegressor(
-        loss="poisson",
+        # FPL scores can be negative after deductions, so Poisson loss is not
+        # valid. Squared-error regression supports the complete point range.
+        loss="squared_error",
         learning_rate=0.05,
         max_iter=300,
         max_leaf_nodes=15,
