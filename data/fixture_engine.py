@@ -13,6 +13,12 @@ NEXT_GW_OPPONENT_DEFENCE_COLUMNS = [
     "next_1gw_opponent_avg_5fixture_clean_sheet_rate",
 ]
 
+NEXT_GW_TEAM_CONTEXT_COLUMNS = [
+    "next_1gw_team_avg_5fixture_goals_conceded",
+    "next_1gw_team_avg_5fixture_clean_sheet_rate",
+    "next_1gw_opponent_avg_5fixture_goals_scored",
+]
+
 
 def prepare_fixture_data(fixtures, require_scores=False):
     """Normalize raw FPL fixture data for team-level feature engineering."""
@@ -80,6 +86,7 @@ def _team_fixture_rows(fixtures, require_scores=False):
             "home_team_id",
             "away_team_id",
             "home_fixture_difficulty",
+            "team_h_score",
             "team_a_score",
             "kickoff_time",
             "finished",
@@ -89,6 +96,7 @@ def _team_fixture_rows(fixtures, require_scores=False):
             "home_team_id": "team_id",
             "away_team_id": "opponent_team_id",
             "home_fixture_difficulty": "fixture_difficulty",
+            "team_h_score": "goals_scored",
             "team_a_score": "goals_conceded",
         }
     )
@@ -101,6 +109,7 @@ def _team_fixture_rows(fixtures, require_scores=False):
             "away_team_id",
             "home_team_id",
             "away_fixture_difficulty",
+            "team_a_score",
             "team_h_score",
             "kickoff_time",
             "finished",
@@ -110,6 +119,7 @@ def _team_fixture_rows(fixtures, require_scores=False):
             "away_team_id": "team_id",
             "home_team_id": "opponent_team_id",
             "away_fixture_difficulty": "fixture_difficulty",
+            "team_a_score": "goals_scored",
             "team_h_score": "goals_conceded",
         }
     )
@@ -192,6 +202,28 @@ def _opponent_defence_as_of(team_rows, current_gameweek, lookback=5):
     )
 
 
+def _team_context_as_of(team_rows, current_gameweek, lookback=5):
+    """Return a team's attacking and defensive form known at gameweek t."""
+    history = team_rows.copy()
+    for column in ("goals_scored", "goals_conceded"):
+        history[column] = pd.to_numeric(history[column], errors="coerce")
+
+    completed = history[
+        history["gameweek"].le(current_gameweek)
+        & history["goals_scored"].notna()
+        & history["goals_conceded"].notna()
+    ].sort_values(["gameweek", "fixture_id"])
+    recent = completed.tail(lookback)
+    if len(recent) < lookback:
+        return None, None, None
+
+    return (
+        recent["goals_conceded"].mean(),
+        recent["goals_conceded"].eq(0).mean(),
+        recent["goals_scored"].mean(),
+    )
+
+
 def build_fixture_features(fixtures, season=None):
     """Build future-fixture features for every team and current gameweek.
 
@@ -247,6 +279,15 @@ def build_fixture_features(fixtures, season=None):
 
             opponent_goals_conceded = []
             opponent_clean_sheet_rates = []
+            opponent_goals_scored = []
+
+            (
+                team_goals_conceded,
+                team_clean_sheet_rate,
+                _,
+            ) = _team_context_as_of(team_rows, current_gameweek)
+            row["next_1gw_team_avg_5fixture_goals_conceded"] = team_goals_conceded
+            row["next_1gw_team_avg_5fixture_clean_sheet_rate"] = team_clean_sheet_rate
 
             immediate_opponents = team_rows[
                 team_rows["gameweek"].eq(current_gameweek + 1)
@@ -261,6 +302,11 @@ def build_fixture_features(fixtures, season=None):
                 if goals_conceded is not None:
                     opponent_goals_conceded.append(goals_conceded)
                     opponent_clean_sheet_rates.append(clean_sheet_rate)
+                    _, _, goals_scored = _team_context_as_of(
+                        team_history[int(opponent_id)],
+                        current_gameweek,
+                    )
+                    opponent_goals_scored.append(goals_scored)
 
             row["next_1gw_opponent_avg_5fixture_goals_conceded"] = (
                 sum(opponent_goals_conceded) / len(opponent_goals_conceded)
@@ -272,6 +318,11 @@ def build_fixture_features(fixtures, season=None):
                 sum(opponent_clean_sheet_rates)
                 / len(opponent_clean_sheet_rates)
                 if opponent_clean_sheet_rates
+                else None
+            )
+            row["next_1gw_opponent_avg_5fixture_goals_scored"] = (
+                sum(opponent_goals_scored) / len(opponent_goals_scored)
+                if opponent_goals_scored
                 else None
             )
 
@@ -302,6 +353,7 @@ def attach_fixture_features(prediction_features, fixture_features):
         key_columns
         + NEXT_GW_FIXTURE_COLUMNS
         + NEXT_GW_OPPONENT_DEFENCE_COLUMNS
+        + NEXT_GW_TEAM_CONTEXT_COLUMNS
     )
 
     missing_prediction = [
@@ -330,6 +382,7 @@ def attach_fixture_features(prediction_features, fixture_features):
             key_columns
             + NEXT_GW_FIXTURE_COLUMNS
             + NEXT_GW_OPPONENT_DEFENCE_COLUMNS
+            + NEXT_GW_TEAM_CONTEXT_COLUMNS
         ],
         on=key_columns,
         how="left",
