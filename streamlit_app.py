@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 
 from data.model import (
+    get_feature_importance,
     predict_next_gameweek,
     train_and_evaluate,
     train_final_model,
@@ -856,10 +857,12 @@ if st.button("Train and evaluate next-GW model", type="primary"):
 
             # This version is for future scoring after evaluation is complete.
             production_model = train_final_model(training_features)
+            feature_importance = get_feature_importance(evaluation_model)
 
         st.session_state["fpl_production_model"] = production_model
         st.session_state["fpl_validation_results"] = validation_results
         st.session_state["fpl_model_evaluation"] = evaluation.to_dict()
+        st.session_state["fpl_feature_importance"] = feature_importance
         st.session_state["fpl_training_features"] = training_features
 
         st.success("Model trained and temporally evaluated.")
@@ -891,6 +894,37 @@ if "fpl_model_evaluation" in st.session_state:
         st.warning(
             "The model does not yet beat the baseline. Do not use it for "
             "transfer decisions until features or model selection improve."
+        )
+
+    if "fpl_feature_importance" in st.session_state:
+        st.subheader("Model Feature Importance")
+        st.caption(
+            "Importance shows how much the fitted Random Forest relied on "
+            "each input. It is not a measure of cause and effect."
+        )
+
+        feature_importance = st.session_state["fpl_feature_importance"].copy()
+        top_feature_importance = feature_importance.head(15)
+
+        st.bar_chart(
+            top_feature_importance.set_index("feature")["importance"],
+            horizontal=True,
+        )
+
+        st.dataframe(
+            top_feature_importance,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "importance": st.column_config.NumberColumn(
+                    "Importance",
+                    format="%.4f",
+                ),
+                "importance_pct": st.column_config.NumberColumn(
+                    "Share of model importance (%)",
+                    format="%.2f%%",
+                ),
+            },
         )
 
     st.subheader("Held-out Predictions")
