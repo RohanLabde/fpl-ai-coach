@@ -64,8 +64,17 @@ NUMERIC_FEATURE_COLUMNS = [
     "previous_gw_xa", "rolling_3gw_xa", "rolling_5gw_xa", "rolling_10gw_xa",
     "previous_gw_xgi", "rolling_3gw_xgi", "rolling_5gw_xgi", "rolling_10gw_xgi",
     "previous_gw_minutes", "rolling_3gw_minutes", "rolling_5gw_minutes", "rolling_10gw_minutes",
+    "previous_gw_played", "previous_gw_60_minute_appearance",
     "previous_gw_starts", "rolling_3gw_starts", "rolling_5gw_starts", "rolling_10gw_starts",
     "rolling_3gw_start_rate", "rolling_5gw_start_rate", "rolling_10gw_start_rate",
+    "rolling_3gw_minutes_per_fixture", "rolling_5gw_minutes_per_fixture",
+    "rolling_10gw_minutes_per_fixture", "rolling_3gw_play_rate",
+    "rolling_5gw_play_rate", "rolling_10gw_play_rate",
+    "rolling_3gw_60_minute_appearance_rate",
+    "rolling_5gw_60_minute_appearance_rate",
+    "rolling_10gw_60_minute_appearance_rate",
+    "minutes_trend_3gw_vs_10gw", "start_rate_trend_3gw_vs_10gw",
+    "expected_minutes_per_fixture", "expected_minutes_next_gw",
     "next_1gw_fixture_count", "next_1gw_avg_fdr",
     "next_1gw_home_count", "next_1gw_away_count",
     "next_1gw_opponent_avg_5fixture_goals_conceded",
@@ -77,7 +86,13 @@ MODEL_FEATURE_COLUMNS = NUMERIC_FEATURE_COLUMNS + CATEGORICAL_FEATURE_COLUMNS
 AVAILABILITY_FEATURE_COLUMNS = [
     column
     for column in NUMERIC_FEATURE_COLUMNS
-    if "minutes" in column or "starts" in column or "start_rate" in column
+    if any(
+        token in column
+        for token in (
+            "minutes", "starts", "start_rate", "play_rate",
+            "appearance_rate", "played",
+        )
+    )
 ]
 CORE_FORM_FEATURE_COLUMNS = [
     column
