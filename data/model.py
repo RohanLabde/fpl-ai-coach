@@ -23,6 +23,39 @@ from sklearn.preprocessing import OneHotEncoder
 
 TARGET_COLUMN = "next_gw_points"
 IDENTIFIER_COLUMNS = ["season", "gameweek", "player_id", "player_name", "team_id", "team_name"]
+ADDITIONAL_PLAYER_METRICS = [
+    "goals_scored",
+    "assists",
+    "clean_sheets",
+    "bonus",
+    "threat",
+    "creativity",
+    "defensive_contribution",
+]
+ADDITIONAL_PLAYER_FEATURE_COLUMNS = [
+    f"previous_gw_{metric}"
+    for metric in ADDITIONAL_PLAYER_METRICS
+] + [
+    f"rolling_{window}gw_{metric}"
+    for metric in ADDITIONAL_PLAYER_METRICS
+    for window in (3, 5, 10)
+] + [
+    f"rolling_{window}gw_{metric}_per_90"
+    for window in (3, 5)
+    for metric in (
+        "xgi",
+        "goals_scored",
+        "assists",
+        "threat",
+        "creativity",
+        "defensive_contribution",
+    )
+]
+TEAM_CONTEXT_FEATURE_COLUMNS = [
+    "next_1gw_team_avg_5fixture_goals_conceded",
+    "next_1gw_team_avg_5fixture_clean_sheet_rate",
+    "next_1gw_opponent_avg_5fixture_goals_scored",
+]
 NUMERIC_FEATURE_COLUMNS = [
     "previous_gw_points", "rolling_3gw_points", "rolling_5gw_points", "rolling_10gw_points",
     "previous_gw_xg", "rolling_3gw_xg", "rolling_5gw_xg", "rolling_10gw_xg",
@@ -35,7 +68,7 @@ NUMERIC_FEATURE_COLUMNS = [
     "next_1gw_home_count", "next_1gw_away_count",
     "next_1gw_opponent_avg_5fixture_goals_conceded",
     "next_1gw_opponent_avg_5fixture_clean_sheet_rate",
-]
+] + ADDITIONAL_PLAYER_FEATURE_COLUMNS + TEAM_CONTEXT_FEATURE_COLUMNS
 CATEGORICAL_FEATURE_COLUMNS = ["position"]
 MODEL_FEATURE_COLUMNS = NUMERIC_FEATURE_COLUMNS + CATEGORICAL_FEATURE_COLUMNS
 
