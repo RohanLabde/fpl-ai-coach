@@ -959,14 +959,19 @@ def _add_calendar_previous_features(df):
             .shift(1)
         )
 
-    previous_minutes = calendar_values["minutes"].groupby(
-        [result["season"], result["player_id"]]
+    player_groups = [result["season"], result["player_id"]]
+    # Persist availability indicators as numeric 1.0/0.0 values. The feature
+    # table schema uses numeric columns, and nullable floats preserve the
+    # first-gameweek value before a player has any prior history.
+    result["previous_gw_played"] = (
+        calendar_values["minutes"].gt(0).astype(float)
+        .groupby(player_groups)
+        .shift(1)
     )
-    result["previous_gw_played"] = previous_minutes.transform(
-        lambda values: values.gt(0).shift(1)
-    )
-    result["previous_gw_60_minute_appearance"] = previous_minutes.transform(
-        lambda values: values.ge(60).shift(1)
+    result["previous_gw_60_minute_appearance"] = (
+        calendar_values["minutes"].ge(60).astype(float)
+        .groupby(player_groups)
+        .shift(1)
     )
 
     return result
