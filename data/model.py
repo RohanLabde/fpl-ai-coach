@@ -16,6 +16,7 @@ import pandas as pd
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.impute import SimpleImputer
+from sklearn.inspection import permutation_importance
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder
@@ -71,6 +72,43 @@ NUMERIC_FEATURE_COLUMNS = [
 ] + ADDITIONAL_PLAYER_FEATURE_COLUMNS + TEAM_CONTEXT_FEATURE_COLUMNS
 CATEGORICAL_FEATURE_COLUMNS = ["position"]
 MODEL_FEATURE_COLUMNS = NUMERIC_FEATURE_COLUMNS + CATEGORICAL_FEATURE_COLUMNS
+
+AVAILABILITY_FEATURE_COLUMNS = [
+    column
+    for column in NUMERIC_FEATURE_COLUMNS
+    if "minutes" in column or "starts" in column or "start_rate" in column
+]
+CORE_FORM_FEATURE_COLUMNS = [
+    column
+    for column in NUMERIC_FEATURE_COLUMNS
+    if any(token in column for token in ("points", "_xg", "_xa", "_xgi"))
+]
+ATTACKING_FEATURE_COLUMNS = [
+    column
+    for column in ADDITIONAL_PLAYER_FEATURE_COLUMNS
+    if any(
+        token in column
+        for token in ("goals_scored", "assists", "bonus", "threat", "creativity")
+    )
+]
+DEFENSIVE_FEATURE_COLUMNS = [
+    column
+    for column in ADDITIONAL_PLAYER_FEATURE_COLUMNS
+    if "clean_sheets" in column or "defensive_contribution" in column
+]
+FIXTURE_FEATURE_COLUMNS = [
+    column
+    for column in NUMERIC_FEATURE_COLUMNS
+    if column.startswith("next_1gw_")
+]
+FEATURE_GROUPS = {
+    "Availability and starts": AVAILABILITY_FEATURE_COLUMNS,
+    "Points and expected output": CORE_FORM_FEATURE_COLUMNS,
+    "Attacking underlying data": ATTACKING_FEATURE_COLUMNS,
+    "Defensive underlying data": DEFENSIVE_FEATURE_COLUMNS,
+    "Fixture context": FIXTURE_FEATURE_COLUMNS,
+    "Position": CATEGORICAL_FEATURE_COLUMNS,
+}
 
 
 @dataclass(frozen=True)
@@ -251,6 +289,108 @@ def get_feature_importance(model: Pipeline) -> pd.DataFrame:
     return result
 
 
+def get_permutation_importance(
+    model: Pipeline,
+    validation_frame: pd.DataFrame,
+    repeats: int = 3,
+    random_state: int = 42,
+) -> pd.DataFrame:
+    """Measure held-out feature value using MAE degradation when shuffled.
+
+    Unlike impurity-based Random Forest importance, this is evaluated on data
+    the model did not train on and is less biased toward high-cardinality,
+    correlated inputs such as raw minutes.
+    """
+    if repeats < 1:
+        raise ValueError("Permutation repeats must be at least 1")
+
+    _validate_columns(validation_frame, include_target=True)
+    result = permutation_importance(
+        model,
+        validation_frame[MODEL_FEATURE_COLUMNS],
+        validation_frame[TARGET_COLUMN],
+        scoring="neg_mean_absolute_error",
+        n_repeats=repeats,
+        random_state=random_state,
+        # The fitted forest already uses all available workers.  Avoid nested
+        # parallelism in constrained Streamlit deployment environments.
+        n_jobs=1,
+    )
+    importance = pd.DataFrame(
+        {
+            "feature": MODEL_FEATURE_COLUMNS,
+            "mae_increase": result.importances_mean,
+            "mae_increase_std": result.importances_std,
+        }
+    ).sort_values("mae_increase", ascending=False).reset_index(drop=True)
+    return importance
+
+
+def get_grouped_permutation_importance(
+    model: Pipeline,
+    validation_frame: pd.DataFrame,
+    repeats: int = 3,
+    random_state: int = 42,
+) -> pd.DataFrame:
+    """Measure the held-out MAE cost of jointly shuffling related features."""
+    if repeats < 1:
+        raise ValueError("Permutation repeats must be at least 1")
+
+    _validate_columns(validation_frame, include_target=True)
+    features = validation_frame[MODEL_FEATURE_COLUMNS].copy()
+    actual = validation_frame[TARGET_COLUMN].to_numpy()
+    baseline_predictions = np.clip(model.predict(features), a_min=0, a_max=None)
+    baseline_mae = mean_absolute_error(actual, baseline_predictions)
+    random_generator = np.random.default_rng(random_state)
+    rows = []
+
+    for group_name, columns in FEATURE_GROUPS.items():
+        increases = []
+        for _ in range(repeats):
+            shuffled = features.copy()
+            permutation = random_generator.permutation(len(shuffled))
+            shuffled.loc[:, columns] = shuffled.loc[:, columns].iloc[
+                permutation
+            ].to_numpy()
+            predictions = np.clip(model.predict(shuffled), a_min=0, a_max=None)
+            increases.append(mean_absolute_error(actual, predictions) - baseline_mae)
+        rows.append(
+            {
+                "feature_group": group_name,
+                "mae_increase": float(np.mean(increases)),
+                "mae_increase_std": float(np.std(increases)),
+            }
+        )
+
+    return pd.DataFrame(rows).sort_values(
+        "mae_increase", ascending=False
+    ).reset_index(drop=True)
+
+
+def get_position_validation(validation_results: pd.DataFrame) -> pd.DataFrame:
+    """Return held-out accuracy by FPL position for model health checks."""
+    required = {"position", TARGET_COLUMN, "predicted_next_gw_points"}
+    missing = sorted(required.difference(validation_results.columns))
+    if missing:
+        raise ValueError(f"Position validation is missing columns: {missing}")
+
+    rows = []
+    for position, group in validation_results.groupby("position", dropna=False):
+        actual = group[TARGET_COLUMN].to_numpy()
+        predicted = group["predicted_next_gw_points"].to_numpy()
+        rows.append(
+            {
+                "position": "Unknown" if pd.isna(position) else str(position),
+                "held_out_rows": len(group),
+                "mae": float(mean_absolute_error(actual, predicted)),
+                "rmse": float(np.sqrt(mean_squared_error(actual, predicted))),
+                "actual_points_per_gw": float(np.mean(actual)),
+                "predicted_points_per_gw": float(np.mean(predicted)),
+            }
+        )
+    return pd.DataFrame(rows).sort_values("position").reset_index(drop=True)
+
+
 def train_and_evaluate(
     feature_frame: pd.DataFrame,
     validation_gameweeks: int = 8,
@@ -289,9 +429,10 @@ def train_and_evaluate(
         baseline_rmse=float(np.sqrt(mean_squared_error(actual, baseline_prediction))),
     )
 
-    validation_results = validation[
-        IDENTIFIER_COLUMNS + [TARGET_COLUMN]
-    ].copy()
+    # Keep the feature columns in the held-out frame.  The Streamlit layer uses
+    # them for permutation diagnostics, while it selects a compact subset for
+    # the prediction table shown to users.
+    validation_results = validation.copy()
     validation_results["predicted_next_gw_points"] = predictions
     validation_results["prediction_error"] = (
         validation_results["predicted_next_gw_points"]
