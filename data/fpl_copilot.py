@@ -19,7 +19,7 @@ except ImportError:  # Keep the rest of the Streamlit app usable until installed
 
 
 DEFAULT_MODEL = "gpt-5-mini"
-MAX_TOOL_ROUNDS = 4
+MAX_TOOL_ROUNDS = 3
 
 SYSTEM_INSTRUCTIONS = """
 You are FPL Copilot, a careful Fantasy Premier League research assistant.
@@ -36,6 +36,12 @@ Keep answers concise and practical. Explain uncertainty, distinguish observed
 statistics from inference, and never imply that you can execute transfers.
 If the data cannot answer a request, say exactly what is missing and suggest a
 grounded next question.
+
+Do not call the same function more than once for a single answer. If a player
+search returns an empty rows list, immediately explain that the player is not
+in the latest imported player snapshot; do not retry alternative spellings
+unless the user explicitly asks. Use no more than three data functions, then
+answer using the returned evidence.
 """.strip()
 
 
@@ -155,6 +161,17 @@ def _run_tool(name, arguments):
         return {"error": f"Data lookup failed: {error}"}
 
 
+def _empty_search_answer(arguments):
+    """Avoid spending more tool calls when a player is absent from the index."""
+    query = arguments.get("query", "that player").strip() or "that player"
+    return (
+        f"I could not find **{query}** in the latest imported player snapshot. "
+        "That does not prove the player has no historical data; it means the "
+        "current player index does not contain a matching name. Update the "
+        "Player Database, then try again with the player name or FPL player ID."
+    )
+
+
 def answer_fpl_question(messages):
     """Answer a chat question with bounded, read-only tool calls."""
     if not copilot_is_configured():
@@ -167,6 +184,7 @@ def answer_fpl_question(messages):
         for message in messages[-12:]
     ]
     consulted_sources = []
+    used_tools = set()
 
     for _ in range(MAX_TOOL_ROUNDS):
         response = client.responses.create(
@@ -186,12 +204,31 @@ def answer_fpl_question(messages):
 
         input_items.extend(response.output)
         for call in function_calls:
+            if call.name in used_tools:
+                return (
+                    "I already checked that data source for this question and "
+                    "will not repeat the lookup. Please try a more specific "
+                    "player name or ask a different FPL question.",
+                    consulted_sources,
+                )
             try:
                 arguments = json.loads(call.arguments)
             except json.JSONDecodeError:
                 arguments = {}
             result = _run_tool(call.name, arguments)
+            used_tools.add(call.name)
             consulted_sources.append(call.name)
+
+            if call.name == "search_fpl_players" and not result.get("rows"):
+                return _empty_search_answer(arguments), consulted_sources
+
+            if result.get("error"):
+                return (
+                    "I could not complete the requested FPL data lookup. "
+                    f"The data source returned: {result['error']}",
+                    consulted_sources,
+                )
+
             input_items.append(
                 {
                     "type": "function_call_output",
@@ -225,7 +262,7 @@ def render_fpl_copilot():
     if "fpl_copilot_messages" not in st.session_state:
         st.session_state["fpl_copilot_messages"] = []
 
-    first, second, third = st.columns(3)
+    first, second, third, fourth = st.columns(4)
     prompt = None
     if first.button("Find a player", key="copilot_find_player"):
         prompt = "What data do you have for Mohamed Salah?"
@@ -233,6 +270,9 @@ def render_fpl_copilot():
         prompt = "Who are the latest midfield form leaders by xGI?"
     if third.button("Data coverage", key="copilot_data_coverage"):
         prompt = "How current is the FPL data you can access?"
+    if fourth.button("Clear chat", key="copilot_clear_chat"):
+        st.session_state["fpl_copilot_messages"] = []
+        st.rerun()
 
     for message in st.session_state["fpl_copilot_messages"]:
         with st.chat_message(message["role"]):
