@@ -813,3 +813,236 @@ def _save_prediction_features_legacy(features):
             raise
 
     return total
+
+
+# ============================================================
+# FPL COPILOT — READ-ONLY DATA ACCESS
+# ============================================================
+
+
+_FPL_POSITIONS = {"GKP", "DEF", "MID", "FWD"}
+_FORM_METRICS = {
+    "points": "rolling_3gw_points",
+    "xgi": "rolling_3gw_xgi",
+    "minutes": "rolling_3gw_minutes",
+    "threat": "rolling_3gw_threat",
+    "creativity": "rolling_3gw_creativity",
+    "defensive_contribution": "rolling_3gw_defensive_contribution",
+}
+
+
+def _read_dataframe(sql, params=None):
+    """Run a parameterised read-only query and return a dataframe."""
+    conn = get_database_connection()
+    with conn.session as session:
+        result = session.execute(text(sql), params or {})
+        return pd.DataFrame(result.mappings().all())
+
+
+def _records(frame):
+    """Convert database values to JSON-safe records for the language model."""
+    if frame.empty:
+        return []
+    return (
+        frame.astype(object)
+        .where(pd.notna(frame), None)
+        .to_dict(orient="records")
+    )
+
+
+def search_fpl_players(query, position=None, limit=8):
+    """Find current player records by name, with fixed query limits."""
+    position = position.upper() if position else None
+    if position and position not in _FPL_POSITIONS:
+        raise ValueError("position must be one of GKP, DEF, MID, or FWD.")
+
+    limit = max(1, min(int(limit), 10))
+    rows = _read_dataframe(
+        """
+        SELECT
+            player_id,
+            first_name || ' ' || second_name AS player_name,
+            team_name,
+            position,
+            price,
+            total_points,
+            form,
+            selected_by_percent
+        FROM public.players
+        WHERE (first_name || ' ' || second_name) ILIKE :name_pattern
+          AND (:position IS NULL OR position = :position)
+        ORDER BY total_points DESC NULLS LAST, form DESC NULLS LAST
+        LIMIT :limit
+        """,
+        {
+            "name_pattern": f"%{query.strip()}%",
+            "position": position,
+            "limit": limit,
+        },
+    )
+    return {
+        "source": "players (latest imported FPL player snapshot)",
+        "rows": _records(rows),
+    }
+
+
+def get_player_recent_form(player_id, gameweeks=5):
+    """Return the most recent historical gameweeks for one player."""
+    gameweeks = max(1, min(int(gameweeks), 10))
+    rows = _read_dataframe(
+        """
+        SELECT
+            season,
+            gameweek,
+            player_name,
+            position,
+            team_name,
+            opponent_team_id,
+            was_home,
+            minutes,
+            total_points,
+            goals_scored,
+            assists,
+            clean_sheets,
+            expected_goals,
+            expected_assists,
+            expected_goal_involvements,
+            creativity,
+            threat,
+            defensive_contribution
+        FROM public.player_gameweek
+        WHERE player_id = :player_id
+        ORDER BY season DESC, gameweek DESC, fixture_id DESC
+        LIMIT :limit
+        """,
+        {"player_id": int(player_id), "limit": gameweeks},
+    )
+    return {
+        "source": "player_gameweek (historical fixture-level data)",
+        "rows": _records(rows),
+    }
+
+
+def get_latest_feature_snapshot(player_id):
+    """Return the latest feature row, clearly labelled as a historical snapshot."""
+    rows = _read_dataframe(
+        """
+        SELECT
+            season,
+            gameweek AS feature_gameweek,
+            player_id,
+            player_name,
+            position,
+            team_name,
+            next_1gw_fixture_count,
+            next_1gw_avg_fdr,
+            expected_minutes_next_gw,
+            rolling_3gw_points,
+            rolling_3gw_minutes,
+            rolling_3gw_xgi,
+            rolling_3gw_threat,
+            rolling_3gw_creativity,
+            rolling_3gw_defensive_contribution,
+            next_gw_points AS realised_next_gw_points
+        FROM public.prediction_features
+        WHERE player_id = :player_id
+        ORDER BY season DESC, gameweek DESC
+        LIMIT 1
+        """,
+        {"player_id": int(player_id)},
+    )
+    return {
+        "source": (
+            "prediction_features (latest historical feature snapshot; "
+            "not a live prediction)"
+        ),
+        "rows": _records(rows),
+    }
+
+
+def get_form_leaderboard(metric="points", position=None, limit=10):
+    """Return leaders from the latest available historical feature snapshot."""
+    metric = metric.lower()
+    if metric not in _FORM_METRICS:
+        raise ValueError(f"metric must be one of {sorted(_FORM_METRICS)}.")
+
+    position = position.upper() if position else None
+    if position and position not in _FPL_POSITIONS:
+        raise ValueError("position must be one of GKP, DEF, MID, or FWD.")
+
+    limit = max(1, min(int(limit), 15))
+    metric_column = _FORM_METRICS[metric]
+    rows = _read_dataframe(
+        f"""
+        WITH latest_snapshot AS (
+            SELECT season, MAX(gameweek) AS gameweek
+            FROM public.prediction_features
+            GROUP BY season
+            ORDER BY season DESC
+            LIMIT 1
+        )
+        SELECT
+            pf.player_id,
+            pf.player_name,
+            pf.position,
+            pf.team_name,
+            pf.gameweek AS feature_gameweek,
+            pf.{metric_column} AS metric_value,
+            pf.rolling_3gw_points,
+            pf.rolling_3gw_xgi,
+            pf.rolling_3gw_minutes,
+            pf.expected_minutes_next_gw,
+            pf.next_1gw_fixture_count,
+            pf.next_1gw_avg_fdr
+        FROM public.prediction_features pf
+        INNER JOIN latest_snapshot latest
+            ON pf.season = latest.season
+           AND pf.gameweek = latest.gameweek
+        WHERE (:position IS NULL OR pf.position = :position)
+        ORDER BY pf.{metric_column} DESC NULLS LAST, pf.player_name
+        LIMIT :limit
+        """,
+        {"position": position, "limit": limit},
+    )
+    return {
+        "source": (
+            "prediction_features (latest historical feature snapshot; "
+            "not a live recommendation)"
+        ),
+        "metric": metric,
+        "rows": _records(rows),
+    }
+
+
+def get_fpl_data_status():
+    """Describe data freshness so the assistant never implies live coverage."""
+    players = _read_dataframe(
+        """
+        SELECT COUNT(*) AS player_count
+        FROM public.players
+        """
+    )
+    history = _read_dataframe(
+        """
+        SELECT
+            MAX(season) AS latest_historical_season,
+            MAX(gameweek) AS latest_historical_gameweek,
+            COUNT(*) AS historical_rows
+        FROM public.player_gameweek
+        """
+    )
+    features = _read_dataframe(
+        """
+        SELECT
+            MAX(season) AS latest_feature_season,
+            MAX(gameweek) AS latest_feature_gameweek,
+            COUNT(*) AS feature_rows
+        FROM public.prediction_features
+        """
+    )
+    return {
+        "source": "database coverage metadata",
+        "players": _records(players),
+        "historical_data": _records(history),
+        "feature_data": _records(features),
+    }
