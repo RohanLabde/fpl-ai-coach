@@ -41,6 +41,8 @@ from data.features import (
     build_form_features
 )
 
+from data.fpl_copilot import render_fpl_copilot
+
 
 HISTORICAL_2025_26_URL = (
     "https://raw.githubusercontent.com/"
@@ -59,6 +61,15 @@ st.set_page_config(
 )
 
 st.title("⚽ FPL AI Coach")
+
+
+# ============================================================
+# FPL COPILOT
+# ============================================================
+
+render_fpl_copilot()
+
+st.divider()
 
 
 # ============================================================
