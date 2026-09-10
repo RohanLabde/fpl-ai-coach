@@ -8,9 +8,12 @@ from data.db import (
     get_fpl_data_status,
     get_form_leaderboard,
     get_latest_feature_snapshot,
+    get_live_player_profile,
     get_player_recent_form,
+    get_player_upcoming_fixtures,
     search_fpl_players,
 )
+from data.fpl_live import refresh_live_fpl_data
 
 try:
     from openai import OpenAI
@@ -36,6 +39,11 @@ Keep answers concise and practical. Explain uncertainty, distinguish observed
 statistics from inference, and never imply that you can execute transfers.
 If the data cannot answer a request, say exactly what is missing and suggest a
 grounded next question.
+
+Use live snapshot and fixture sources for questions about current price,
+availability, ownership, current team, or upcoming fixtures. Use
+player_gameweek for completed historical performance. State the snapshot time
+when data came from a live snapshot.
 
 Do not call the same function more than once for a single answer. If a player
 search returns an empty rows list, immediately explain that the player is not
@@ -117,6 +125,33 @@ TOOLS = [
     },
     {
         "type": "function",
+        "name": "get_live_player_profile",
+        "description": "Get the latest stored live FPL snapshot for a player, including price, availability, ownership and the snapshot timestamp.",
+        "strict": True,
+        "parameters": {
+            "type": "object",
+            "properties": {"player_id": {"type": "integer"}},
+            "required": ["player_id"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "type": "function",
+        "name": "get_player_upcoming_fixtures",
+        "description": "Get upcoming fixtures from the stored live FPL fixture feed for one player.",
+        "strict": True,
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "player_id": {"type": "integer"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 8},
+            },
+            "required": ["player_id", "limit"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "type": "function",
         "name": "get_fpl_data_status",
         "description": "Check database coverage and freshness before answering a time-sensitive question.",
         "strict": True,
@@ -134,6 +169,8 @@ TOOL_HANDLERS = {
     "search_fpl_players": search_fpl_players,
     "get_player_recent_form": get_player_recent_form,
     "get_latest_feature_snapshot": get_latest_feature_snapshot,
+    "get_live_player_profile": get_live_player_profile,
+    "get_player_upcoming_fixtures": get_player_upcoming_fixtures,
     "get_form_leaderboard": get_form_leaderboard,
     "get_fpl_data_status": get_fpl_data_status,
 }
@@ -262,8 +299,19 @@ def render_fpl_copilot():
     if "fpl_copilot_messages" not in st.session_state:
         st.session_state["fpl_copilot_messages"] = []
 
-    first, second, third, fourth = st.columns(4)
+    refresh_column, first, second, third, fourth = st.columns(5)
     prompt = None
+    if refresh_column.button("Refresh live FPL data", key="copilot_refresh_live"):
+        try:
+            with st.spinner("Refreshing the live FPL snapshot..."):
+                refresh = refresh_live_fpl_data()
+            st.success(
+                "Live FPL data refreshed: "
+                f"{refresh['player_snapshot_rows']:,} players and "
+                f"{refresh['fixture_rows']:,} fixtures."
+            )
+        except Exception as error:
+            st.error(f"Live FPL refresh failed: {error}")
     if first.button("Find a player", key="copilot_find_player"):
         prompt = "What data do you have for Mohamed Salah?"
     if second.button("Form leaders", key="copilot_form_leaders"):
