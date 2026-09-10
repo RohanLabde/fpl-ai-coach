@@ -1054,36 +1054,63 @@ def get_form_leaderboard(metric="points", position=None, limit=10):
 
 
 def get_fpl_data_status():
-    """Describe data freshness so the assistant never implies live coverage."""
+    """Describe historical coverage and the newest stored live FPL snapshot."""
     players = _read_dataframe(
-        """
-        SELECT COUNT(*) AS player_count
-        FROM public.players
-        """
+        "SELECT COUNT(*) AS player_count FROM public.players"
     )
     history = _read_dataframe(
         """
-        SELECT
-            MAX(season) AS latest_historical_season,
-            MAX(gameweek) AS latest_historical_gameweek,
-            COUNT(*) AS historical_rows
+        SELECT MAX(season) AS latest_historical_season,
+               MAX(gameweek) AS latest_historical_gameweek,
+               COUNT(*) AS historical_rows
         FROM public.player_gameweek
         """
     )
     features = _read_dataframe(
         """
-        SELECT
-            MAX(season) AS latest_feature_season,
-            MAX(gameweek) AS latest_feature_gameweek,
-            COUNT(*) AS feature_rows
+        SELECT MAX(season) AS latest_feature_season,
+               MAX(gameweek) AS latest_feature_gameweek,
+               COUNT(*) AS feature_rows
         FROM public.prediction_features
         """
     )
+    live = _read_dataframe(
+        """
+        SELECT snapshot_at AS latest_live_snapshot_at,
+               current_gameweek,
+               COUNT(*) AS player_snapshot_rows
+        FROM public.fpl_live_player_snapshots
+        WHERE snapshot_at = (
+            SELECT MAX(snapshot_at) FROM public.fpl_live_player_snapshots
+        )
+        GROUP BY snapshot_at, current_gameweek
+        """
+    )
+    fixtures = _read_dataframe(
+        """
+        SELECT MAX(updated_at) AS latest_fixture_refresh_at,
+               COUNT(*) FILTER (WHERE COALESCE(finished, false) = false)
+                   AS upcoming_fixture_rows
+        FROM public.fpl_fixtures
+        """
+    )
+    refresh = _read_dataframe(
+        """
+        SELECT status, completed_at, current_gameweek, latest_finished_gameweek,
+               player_snapshot_rows, fixture_rows, message
+        FROM public.fpl_refresh_runs
+        ORDER BY refresh_id DESC
+        LIMIT 1
+        """
+    )
     return {
-        "source": "database coverage metadata",
+        "source": "database coverage and live refresh metadata",
         "players": _records(players),
         "historical_data": _records(history),
         "feature_data": _records(features),
+        "live_snapshot": _records(live),
+        "live_fixtures": _records(fixtures),
+        "latest_refresh": _records(refresh),
     }
 
 
