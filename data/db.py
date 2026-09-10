@@ -851,13 +851,23 @@ def _records(frame):
 
 
 def search_fpl_players(query, position=None, limit=8):
-    """Find current player records by name, with fixed query limits."""
+    """Find a player in the live snapshot, then fall back to historical data."""
     position = position.upper() if position else None
     if position and position not in _FPL_POSITIONS:
         raise ValueError("position must be one of GKP, DEF, MID, or FWD.")
 
+    normalized_query = str(query).strip()
+    if not normalized_query:
+        raise ValueError("query must contain a player name.")
+
     limit = max(1, min(int(limit), 10))
-    rows = _read_dataframe(
+    params = {
+        "name_pattern": f"%{normalized_query}%",
+        "position": position,
+        "limit": limit,
+    }
+
+    live_rows = _read_dataframe(
         """
         SELECT
             player_id,
@@ -874,15 +884,44 @@ def search_fpl_players(query, position=None, limit=8):
         ORDER BY total_points DESC NULLS LAST, form DESC NULLS LAST
         LIMIT :limit
         """,
-        {
-            "name_pattern": f"%{query.strip()}%",
-            "position": position,
-            "limit": limit,
-        },
+        params,
+    )
+    if not live_rows.empty:
+        return {
+            "source": "players (latest imported FPL player snapshot)",
+            "rows": _records(live_rows),
+        }
+
+    historical_rows = _read_dataframe(
+        """
+        WITH latest_player_rows AS (
+            SELECT DISTINCT ON (player_id)
+                player_id,
+                player_name,
+                team_name,
+                position,
+                season AS latest_historical_season,
+                gameweek AS latest_historical_gameweek
+            FROM public.player_gameweek
+            WHERE player_name ILIKE :name_pattern
+              AND (:position IS NULL OR position = :position)
+            ORDER BY player_id, season DESC, gameweek DESC, fixture_id DESC
+        )
+        SELECT *
+        FROM latest_player_rows
+        ORDER BY latest_historical_season DESC,
+                 latest_historical_gameweek DESC,
+                 player_name
+        LIMIT :limit
+        """,
+        params,
     )
     return {
-        "source": "players (latest imported FPL player snapshot)",
-        "rows": _records(rows),
+        "source": (
+            "player_gameweek (historical player index; "
+            "not a current live player snapshot)"
+        ),
+        "rows": _records(historical_rows),
     }
 
 
