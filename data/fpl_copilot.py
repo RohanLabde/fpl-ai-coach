@@ -49,7 +49,7 @@ TOOLS = [
     {
         "type": "function",
         "name": "search_fpl_players",
-        "description": "Find current player records by name.",
+        "description": "Find a player by name. Searches the current FPL snapshot first, then the historical player index when absent.",
         "strict": True,
         "parameters": {
             "type": "object",
