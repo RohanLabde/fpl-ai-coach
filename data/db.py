@@ -1085,3 +1085,262 @@ def get_fpl_data_status():
         "historical_data": _records(history),
         "feature_data": _records(features),
     }
+
+
+# ============================================================
+# LIVE FPL SNAPSHOTS AND REFRESH AUDIT
+# ============================================================
+
+
+def _database_records(frame):
+    """Convert a dataframe to database-ready records with SQL NULLs."""
+    return (
+        frame.astype(object)
+        .where(pd.notna(frame), None)
+        .to_dict(orient="records")
+    )
+
+
+def save_live_fpl_snapshot(players, fixtures, team_names, current_gameweek,
+                           latest_finished_gameweek):
+    """Save one immutable player snapshot and the current fixture state.
+
+    The mutable players table remains useful for quick lookups; this function
+    additionally preserves an as-of snapshot and a refresh audit record.
+    """
+    snapshot_at = pd.Timestamp.now(tz="UTC").to_pydatetime()
+    players = players.copy()
+    fixtures = fixtures.copy()
+
+    snapshot_frame = pd.DataFrame({
+        "snapshot_at": snapshot_at,
+        "player_id": pd.to_numeric(players["id"], errors="coerce"),
+        "first_name": players.get("first_name"),
+        "second_name": players.get("second_name"),
+        "web_name": players.get("web_name"),
+        "team_id": pd.to_numeric(players["team"], errors="coerce"),
+        "team_name": players.get("team_name"),
+        "position": players.get("position"),
+        "price": pd.to_numeric(players.get("price"), errors="coerce"),
+        "total_points": pd.to_numeric(
+            players.get("total_points"), errors="coerce"
+        ),
+        "form": pd.to_numeric(players.get("form"), errors="coerce"),
+        "selected_by_percent": pd.to_numeric(
+            players.get("selected_by_percent"), errors="coerce"
+        ),
+        "status": players.get("status"),
+        "chance_of_playing_next_round": pd.to_numeric(
+            players.get("chance_of_playing_next_round"), errors="coerce"
+        ),
+        "news": players.get("news"),
+        "current_gameweek": current_gameweek,
+    }).dropna(subset=["player_id"])
+
+    fixture_frame = pd.DataFrame({
+        "fixture_id": pd.to_numeric(fixtures.get("id"), errors="coerce"),
+        "gameweek": pd.to_numeric(fixtures.get("event"), errors="coerce"),
+        "kickoff_time": fixtures.get("kickoff_time"),
+        "started": fixtures.get("started"),
+        "finished": fixtures.get("finished"),
+        "finished_provisional": fixtures.get("finished_provisional"),
+        "home_team_id": pd.to_numeric(fixtures.get("team_h"), errors="coerce"),
+        "home_team_name": fixtures.get("team_h").map(team_names),
+        "away_team_id": pd.to_numeric(fixtures.get("team_a"), errors="coerce"),
+        "away_team_name": fixtures.get("team_a").map(team_names),
+        "home_difficulty": pd.to_numeric(
+            fixtures.get("team_h_difficulty"), errors="coerce"
+        ),
+        "away_difficulty": pd.to_numeric(
+            fixtures.get("team_a_difficulty"), errors="coerce"
+        ),
+    }).dropna(subset=["fixture_id"])
+
+    snapshot_frame["player_id"] = snapshot_frame["player_id"].astype(int)
+    fixture_frame["fixture_id"] = fixture_frame["fixture_id"].astype(int)
+    fixture_frame["gameweek"] = fixture_frame["gameweek"].astype("Int64")
+
+    snapshot_records = _database_records(snapshot_frame)
+    fixture_records = _database_records(fixture_frame)
+    conn = get_database_connection()
+
+    snapshot_sql = text(
+        """
+        INSERT INTO public.fpl_live_player_snapshots (
+            snapshot_at, player_id, first_name, second_name, web_name,
+            team_id, team_name, position, price, total_points, form,
+            selected_by_percent, status, chance_of_playing_next_round, news,
+            current_gameweek
+        )
+        VALUES (
+            :snapshot_at, :player_id, :first_name, :second_name, :web_name,
+            :team_id, :team_name, :position, :price, :total_points, :form,
+            :selected_by_percent, :status, :chance_of_playing_next_round,
+            :news, :current_gameweek
+        )
+        """
+    )
+    fixture_sql = text(
+        """
+        INSERT INTO public.fpl_fixtures (
+            fixture_id, gameweek, kickoff_time, started, finished,
+            finished_provisional, home_team_id, home_team_name, away_team_id,
+            away_team_name, home_difficulty, away_difficulty, updated_at
+        )
+        VALUES (
+            :fixture_id, :gameweek, :kickoff_time, :started, :finished,
+            :finished_provisional, :home_team_id, :home_team_name,
+            :away_team_id, :away_team_name, :home_difficulty,
+            :away_difficulty, now()
+        )
+        ON CONFLICT (fixture_id)
+        DO UPDATE SET
+            gameweek = EXCLUDED.gameweek,
+            kickoff_time = EXCLUDED.kickoff_time,
+            started = EXCLUDED.started,
+            finished = EXCLUDED.finished,
+            finished_provisional = EXCLUDED.finished_provisional,
+            home_team_id = EXCLUDED.home_team_id,
+            home_team_name = EXCLUDED.home_team_name,
+            away_team_id = EXCLUDED.away_team_id,
+            away_team_name = EXCLUDED.away_team_name,
+            home_difficulty = EXCLUDED.home_difficulty,
+            away_difficulty = EXCLUDED.away_difficulty,
+            updated_at = now()
+        """
+    )
+    run_sql = text(
+        """
+        INSERT INTO public.fpl_refresh_runs (
+            refresh_type, status, completed_at, source, current_gameweek,
+            latest_finished_gameweek, player_snapshot_rows, fixture_rows,
+            message
+        )
+        VALUES (
+            'live_snapshot', 'completed', now(), :source, :current_gameweek,
+            :latest_finished_gameweek, :player_snapshot_rows, :fixture_rows,
+            'Live player snapshot and fixtures refreshed successfully.'
+        )
+        """
+    )
+    failed_run_sql = text(
+        """
+        INSERT INTO public.fpl_refresh_runs (
+            refresh_type, status, completed_at, source, current_gameweek,
+            latest_finished_gameweek, message
+        )
+        VALUES (
+            'live_snapshot', 'failed', now(), 'FPL bootstrap-static + fixtures',
+            :current_gameweek, :latest_finished_gameweek, :message
+        )
+        """
+    )
+
+    try:
+        # Keep the existing current-player lookup table current as well.
+        save_players(players)
+        with conn.session as session:
+            for start in range(0, len(snapshot_records), 500):
+                session.execute(snapshot_sql, snapshot_records[start:start + 500])
+            for start in range(0, len(fixture_records), 500):
+                session.execute(fixture_sql, fixture_records[start:start + 500])
+            session.execute(
+                run_sql,
+                {
+                    "source": "FPL bootstrap-static + fixtures",
+                    "current_gameweek": current_gameweek,
+                    "latest_finished_gameweek": latest_finished_gameweek,
+                    "player_snapshot_rows": len(snapshot_records),
+                    "fixture_rows": len(fixture_records),
+                },
+            )
+            session.commit()
+    except Exception as error:
+        try:
+            with conn.session as session:
+                session.execute(
+                    failed_run_sql,
+                    {
+                        "current_gameweek": current_gameweek,
+                        "latest_finished_gameweek": latest_finished_gameweek,
+                        "message": str(error)[:1000],
+                    },
+                )
+                session.commit()
+        except Exception:
+            pass
+        raise
+
+    return {
+        "snapshot_at": snapshot_at.isoformat(),
+        "player_snapshot_rows": len(snapshot_records),
+        "fixture_rows": len(fixture_records),
+        "current_gameweek": current_gameweek,
+        "latest_finished_gameweek": latest_finished_gameweek,
+    }
+
+
+def get_live_player_profile(player_id):
+    """Return the newest stored live snapshot for a player."""
+    rows = _read_dataframe(
+        """
+        SELECT
+            snapshot_at, player_id, first_name || ' ' || second_name AS player_name,
+            web_name, team_name, position, price, total_points, form,
+            selected_by_percent, status, chance_of_playing_next_round, news,
+            current_gameweek
+        FROM public.fpl_live_player_snapshots
+        WHERE player_id = :player_id
+        ORDER BY snapshot_at DESC
+        LIMIT 1
+        """,
+        {"player_id": int(player_id)},
+    )
+    return {
+        "source": "fpl_live_player_snapshots (latest stored live FPL snapshot)",
+        "rows": _records(rows),
+    }
+
+
+def get_player_upcoming_fixtures(player_id, limit=5):
+    """Return the next stored fixtures for a player based on the latest snapshot."""
+    limit = max(1, min(int(limit), 8))
+    rows = _read_dataframe(
+        """
+        WITH latest_player AS (
+            SELECT DISTINCT ON (player_id)
+                player_id, team_id, team_name, snapshot_at
+            FROM public.fpl_live_player_snapshots
+            WHERE player_id = :player_id
+            ORDER BY player_id, snapshot_at DESC
+        )
+        SELECT
+            lp.snapshot_at,
+            ff.gameweek,
+            ff.kickoff_time,
+            CASE
+                WHEN ff.home_team_id = lp.team_id THEN 'home'
+                ELSE 'away'
+            END AS venue,
+            CASE
+                WHEN ff.home_team_id = lp.team_id THEN ff.away_team_name
+                ELSE ff.home_team_name
+            END AS opponent_team_name,
+            CASE
+                WHEN ff.home_team_id = lp.team_id THEN ff.home_difficulty
+                ELSE ff.away_difficulty
+            END AS fixture_difficulty
+        FROM latest_player lp
+        JOIN public.fpl_fixtures ff
+          ON ff.home_team_id = lp.team_id OR ff.away_team_id = lp.team_id
+        WHERE COALESCE(ff.finished, false) = false
+          AND ff.kickoff_time >= now()
+        ORDER BY ff.kickoff_time
+        LIMIT :limit
+        """,
+        {"player_id": int(player_id), "limit": limit},
+    )
+    return {
+        "source": "fpl_fixtures + fpl_live_player_snapshots (stored live data)",
+        "rows": _records(rows),
+    }
