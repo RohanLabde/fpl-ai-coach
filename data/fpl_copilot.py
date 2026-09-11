@@ -13,7 +13,6 @@ from data.db import (
     get_player_upcoming_fixtures,
     search_fpl_players,
 )
-from data.fpl_live import refresh_live_fpl_data
 
 try:
     from openai import OpenAI
@@ -41,9 +40,10 @@ If the data cannot answer a request, say exactly what is missing and suggest a
 grounded next question.
 
 Use live snapshot and fixture sources for questions about current price,
-availability, ownership, current team, or upcoming fixtures. Use
-player_gameweek for completed historical performance. State the snapshot time
-when data came from a live snapshot.
+availability, ownership, current team, or upcoming fixtures. Use completed
+gameweek totals for finalized current-season performance and player_gameweek
+for older fixture-level history. State the snapshot time when data came from a
+live snapshot.
 
 Do not call the same function more than once for a single answer. If a player
 search returns an empty rows list, immediately explain that the player is not
@@ -204,8 +204,9 @@ def _empty_search_answer(arguments):
     return (
         f"I could not find **{query}** in the latest imported player snapshot. "
         "That does not prove the player has no historical data; it means the "
-        "current player index does not contain a matching name. Update the "
-        "Player Database, then try again with the player name or FPL player ID."
+        "current player index does not contain a matching name. The scheduled "
+        "FPL refresh may not yet include that player; try the FPL player ID or "
+        "ask again after the next refresh."
     )
 
 
@@ -281,13 +282,43 @@ def answer_fpl_question(messages):
     )
 
 
+def _data_freshness_caption():
+    """Return a small, non-interactive summary of the available FPL data."""
+    try:
+        status = get_fpl_data_status()
+        live = status.get("live_snapshot", [])
+        completed = status.get("completed_gameweek_data", [])
+
+        parts = []
+        if live:
+            snapshot = live[0]
+            snapshot_at = snapshot.get("latest_live_snapshot_at")
+            player_count = snapshot.get("player_snapshot_rows")
+            if snapshot_at and player_count:
+                parts.append(
+                    f"Live snapshot: {player_count:,} players, updated {snapshot_at}."
+                )
+
+        if completed:
+            history = completed[0]
+            season = history.get("latest_completed_season")
+            gameweek = history.get("latest_completed_gameweek")
+            if season and gameweek:
+                parts.append(f"Finalized results: {season} through GW {gameweek}.")
+
+        return " ".join(parts) or "FPL data is being prepared."
+    except Exception:
+        return "FPL data refreshes automatically; availability may vary briefly."
+
+
 def render_fpl_copilot():
-    """Render the FPL Copilot section and keep chat history in this session."""
-    st.header("💬 FPL Copilot")
+    """Render a focused, chat-first FPL Copilot experience."""
+    st.title("⚽ FPL Copilot")
     st.caption(
-        "Ask about players and recent form. Answers use read-only FPL data "
-        "tools, and the assistant will flag when the available data is historical."
+        "Ask about players, current prices, upcoming fixtures, or recent form. "
+        "Answers are grounded in the FPL data available to the app."
     )
+    st.caption(_data_freshness_caption())
 
     if not copilot_is_configured():
         st.info(
@@ -299,38 +330,20 @@ def render_fpl_copilot():
     if "fpl_copilot_messages" not in st.session_state:
         st.session_state["fpl_copilot_messages"] = []
 
-    refresh_column, first, second, third, fourth = st.columns(5)
-    prompt = None
-    if refresh_column.button("Refresh live FPL data", key="copilot_refresh_live"):
-        try:
-            with st.spinner("Refreshing the live FPL snapshot..."):
-                refresh = refresh_live_fpl_data()
-            st.success(
-                "Live FPL data refreshed: "
-                f"{refresh['player_snapshot_rows']:,} players and "
-                f"{refresh['fixture_rows']:,} fixtures."
+    if not st.session_state["fpl_copilot_messages"]:
+        with st.chat_message("assistant"):
+            st.markdown(
+                "Hi — ask me anything about FPL. For example: "
+                "**“How has Raya performed in the last three gameweeks?”**"
             )
-        except Exception as error:
-            st.error(f"Live FPL refresh failed: {error}")
-    if first.button("Find a player", key="copilot_find_player"):
-        prompt = "What data do you have for Mohamed Salah?"
-    if second.button("Form leaders", key="copilot_form_leaders"):
-        prompt = "Who are the latest midfield form leaders by xGI?"
-    if third.button("Data coverage", key="copilot_data_coverage"):
-        prompt = "How current is the FPL data you can access?"
-    if fourth.button("Clear chat", key="copilot_clear_chat"):
-        st.session_state["fpl_copilot_messages"] = []
-        st.rerun()
 
     for message in st.session_state["fpl_copilot_messages"]:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
             if message.get("sources"):
-                with st.expander("Data tools consulted"):
-                    st.write(", ".join(message["sources"]))
+                st.caption("Data checked: " + ", ".join(message["sources"]))
 
-    typed_prompt = st.chat_input("Ask an FPL question")
-    prompt = typed_prompt or prompt
+    prompt = st.chat_input("Ask an FPL question")
     if not prompt:
         return
 
@@ -348,10 +361,16 @@ def render_fpl_copilot():
                 )
                 st.markdown(answer)
                 if sources:
-                    with st.expander("Data tools consulted"):
-                        st.write(", ".join(sources))
+                    st.caption("Data checked: " + ", ".join(sources))
                 st.session_state["fpl_copilot_messages"].append(
                     {"role": "assistant", "content": answer, "sources": sources}
                 )
-            except Exception as error:
-                st.error(f"Copilot could not answer that question: {error}")
+            except Exception:
+                message = (
+                    "I could not answer that question right now. Please try "
+                    "again in a moment."
+                )
+                st.error(message)
+                st.session_state["fpl_copilot_messages"].append(
+                    {"role": "assistant", "content": message}
+                )
