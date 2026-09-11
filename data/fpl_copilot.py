@@ -273,8 +273,10 @@ Answer the user's question directly and practically. Do not ask for a metric,
 position, or other clarification when the plan already selected a standard FPL
 default. State the ranking basis in plain language, present a concise numbered
 list when the evidence is a leaderboard, and mention the completed-gameweek
-coverage. Do not invent statistics, recommendations, injuries, fixtures, or
-data that are not in the evidence.
+coverage. For defensive and goalkeeping profiles, foreground the profile's
+defensive statistics and do not frame goals or assists as ranking drivers.
+Do not invent statistics, recommendations, injuries, fixtures, or data that
+are not in the evidence.
 """.strip()
 
 
