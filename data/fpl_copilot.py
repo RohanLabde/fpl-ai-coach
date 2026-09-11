@@ -49,11 +49,16 @@ for older fixture-level history. State the snapshot time when data came from a
 live snapshot.
 
 Interpret ordinary FPL language helpfully. "Top" or "best" means return a
-ranking, not a clarification request. For "best attacking [position] this
-season", infer the FPL position and use the current-season leaderboard with
-metric="attacking" (total xGI) and the requested count, defaulting to 10.
-Only ask a follow-up when the request genuinely cannot be answered from the
-available data.
+ranking, not a clarification request. Rankings are position-aware: use the
+defensive profile for an unspecified defender ranking (clean-sheet rate and
+defensive contribution per 90), the goalkeeping profile for goalkeepers
+(clean sheets, saves per 90, and goals conceded per 90), and attacking form
+for unspecified midfielders and forwards (xGI, with xGI per 90 as a
+tiebreaker). A user can explicitly ask for FPL points, goals, assists, clean
+sheets, threat, creativity, or a defensive-contribution ranking. State the
+ranking basis and the minimum-minutes qualification; do not present early
+season results as definitive. Only ask a follow-up when the request genuinely
+cannot be answered from the available data.
 
 Do not repeat an identical function call with the same arguments. You may use
 separate player searches when comparing players. If a player search returns an
@@ -130,14 +135,14 @@ TOOLS = [
     {
         "type": "function",
         "name": "get_current_season_leaderboard",
-        "description": "Rank players from finalized current-season gameweek totals. Use metric='attacking' for a natural-language request such as 'best attacking midfielders'.",
+        "description": "Rank players from finalized current-season gameweek totals using a transparent profile. For unspecified defenders use 'defensive'; for goalkeepers use 'goalkeeping'; for attacking midfielders or forwards use 'attacking'.",
         "strict": True,
         "parameters": {
             "type": "object",
             "properties": {
                 "metric": {
                     "type": "string",
-                    "enum": ["attacking", "points", "xgi", "goals", "assists", "threat", "creativity"],
+                    "enum": ["attacking", "points", "xgi", "goals", "assists", "threat", "creativity", "defensive", "clean_sheets", "defensive_contribution", "goalkeeping"],
                 },
                 "position": {
                     "type": ["string", "null"],
