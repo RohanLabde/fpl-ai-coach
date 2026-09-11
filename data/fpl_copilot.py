@@ -222,7 +222,7 @@ def answer_fpl_question(messages):
         for message in messages[-12:]
     ]
     consulted_sources = []
-    used_tools = set()
+    tool_results = {}
 
     for _ in range(MAX_TOOL_ROUNDS):
         response = client.responses.create(
@@ -242,20 +242,20 @@ def answer_fpl_question(messages):
 
         input_items.extend(response.output)
         for call in function_calls:
-            if call.name in used_tools:
-                return (
-                    "I already checked that data source for this question and "
-                    "will not repeat the lookup. Please try a more specific "
-                    "player name or ask a different FPL question.",
-                    consulted_sources,
-                )
             try:
                 arguments = json.loads(call.arguments)
             except json.JSONDecodeError:
                 arguments = {}
-            result = _run_tool(call.name, arguments)
-            used_tools.add(call.name)
-            consulted_sources.append(call.name)
+
+            # The model can occasionally request the same source while it is
+            # composing an answer. Reuse the first read-only result instead of
+            # returning an unhelpful safety-limit message to the user.
+            if call.name in tool_results:
+                result = tool_results[call.name]
+            else:
+                result = _run_tool(call.name, arguments)
+                tool_results[call.name] = result
+                consulted_sources.append(call.name)
 
             if call.name == "search_fpl_players" and not result.get("rows"):
                 return _empty_search_answer(arguments), consulted_sources
