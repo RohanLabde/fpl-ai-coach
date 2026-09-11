@@ -1097,7 +1097,6 @@ def get_form_leaderboard(metric="points", position=None, limit=10):
         "rows": _records(rows),
     }
 
-
 # Ranking profiles keep ordinary FPL language position-aware.  They are
 # deliberately transparent rather than opaque weighted scores: every profile
 # states the first-order metrics used to order the result.
@@ -1109,12 +1108,12 @@ _CURRENT_SEASON_RANKINGS = {
         ),
         "basis": (
             "Attacking form: total expected goal involvement first, then "
-            "xGI per 90 among players who meet the minutes threshold."
+            "xGI per 90 among players who meet the starts threshold."
         ),
     },
     "points": {
         "order_by": "total_points DESC, minutes DESC, player_name",
-        "basis": "FPL points leaders among players who meet the minutes threshold.",
+        "basis": "FPL points leaders among players who meet the starts threshold.",
     },
     "xgi": {
         "order_by": (
@@ -1125,11 +1124,11 @@ _CURRENT_SEASON_RANKINGS = {
     },
     "goals": {
         "order_by": "total_goals DESC, minutes DESC, player_name",
-        "basis": "Goals scored among players who meet the minutes threshold.",
+        "basis": "Goals scored among players who meet the starts threshold.",
     },
     "assists": {
         "order_by": "total_assists DESC, minutes DESC, player_name",
-        "basis": "Assists among players who meet the minutes threshold.",
+        "basis": "Assists among players who meet the starts threshold.",
     },
     "threat": {
         "order_by": "total_threat DESC, threat_per_90 DESC NULLS LAST, minutes DESC, player_name",
@@ -1266,7 +1265,7 @@ def compare_fpl_players(player_a_id, player_b_id):
 
 
 def get_current_season_leaderboard(
-    metric="attacking", position=None, limit=10, minimum_minutes=180
+    metric="attacking", position=None, limit=10, minimum_starts=2
 ):
     """Rank current-season players using transparent, position-aware profiles."""
     metric = metric.lower()
@@ -1280,7 +1279,7 @@ def get_current_season_leaderboard(
         raise ValueError("position must be one of GKP, DEF, MID, or FWD.")
 
     limit = max(1, min(int(limit), 15))
-    minimum_minutes = max(0, min(int(minimum_minutes), 2_700))
+    minimum_starts = max(0, min(int(minimum_starts), 38))
     profile = _CURRENT_SEASON_RANKINGS[metric]
 
     rows = _read_dataframe(
@@ -1289,6 +1288,15 @@ def get_current_season_leaderboard(
             SELECT MAX(season) AS season
             FROM public.fpl_completed_gameweek_stats
         ),
+        season_context AS (
+            SELECT
+                stats.season,
+                COUNT(DISTINCT stats.gameweek) AS season_completed_gameweeks
+            FROM public.fpl_completed_gameweek_stats AS stats
+            INNER JOIN latest_season
+                ON stats.season = latest_season.season
+            GROUP BY stats.season
+        ),
         totals AS (
             SELECT
                 stats.player_id,
@@ -1296,6 +1304,8 @@ def get_current_season_leaderboard(
                 MAX(stats.position) AS position,
                 MAX(stats.team_name) AS team_name,
                 COUNT(*) AS completed_gameweeks,
+                MAX(season_context.season_completed_gameweeks)
+                    AS season_completed_gameweeks,
                 SUM(COALESCE(stats.fixture_count, 0)) AS fixtures,
                 SUM(COALESCE(stats.minutes, 0)) AS minutes,
                 SUM(COALESCE(stats.starts, 0)) AS starts,
@@ -1314,6 +1324,8 @@ def get_current_season_leaderboard(
             FROM public.fpl_completed_gameweek_stats AS stats
             INNER JOIN latest_season
                 ON stats.season = latest_season.season
+            INNER JOIN season_context
+                ON stats.season = season_context.season
             WHERE (:position IS NULL OR stats.position = :position)
             GROUP BY stats.player_id
         ),
@@ -1345,7 +1357,7 @@ def get_current_season_leaderboard(
                     THEN total_creativity * 90.0 / minutes
                 END AS creativity_per_90
             FROM totals
-            WHERE minutes >= :minimum_minutes
+            WHERE starts >= LEAST(:minimum_starts, season_completed_gameweeks)
         )
         SELECT *
         FROM ranked
@@ -1355,7 +1367,7 @@ def get_current_season_leaderboard(
         {
             "position": position,
             "limit": limit,
-            "minimum_minutes": minimum_minutes,
+            "minimum_starts": minimum_starts,
         },
     )
     return {
@@ -1365,7 +1377,7 @@ def get_current_season_leaderboard(
         ),
         "metric": metric,
         "ranking_basis": profile["basis"],
-        "minimum_minutes": minimum_minutes,
+        "minimum_starts": minimum_starts,
         "rows": _records(rows),
     }
 
