@@ -77,7 +77,7 @@ TOOLS = [
     {
         "type": "function",
         "name": "get_player_recent_form",
-        "description": "Get the most recent historical fixture-level performances for one player.",
+        "description": "Get recent finalized form for one player. Completed gameweeks are returned as exact gameweek totals; older history can be fixture-level.",
         "strict": True,
         "parameters": {
             "type": "object",
