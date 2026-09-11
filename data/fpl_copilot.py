@@ -14,6 +14,7 @@ from data.db import (
     get_player_upcoming_fixtures,
     search_fpl_players,
 )
+from data.fpl_intents import route_fpl_question
 
 try:
     from openai import OpenAI
@@ -241,13 +242,75 @@ def _empty_search_answer(arguments):
     )
 
 
+COMPOSER_INSTRUCTIONS = """
+You are the final-answer writer for FPL Copilot. A deterministic FPL data plan
+has already run and the supplied evidence is authoritative for this answer.
+
+Answer the user's question directly and practically. Do not ask for a metric,
+position, or other clarification when the plan already selected a standard FPL
+default. State the ranking basis in plain language, present a concise numbered
+list when the evidence is a leaderboard, and mention the completed-gameweek
+coverage. Do not invent statistics, recommendations, injuries, fixtures, or
+data that are not in the evidence.
+""".strip()
+
+
+def _latest_user_question(messages):
+    """Return the last user prompt from the current chat session."""
+    for message in reversed(messages):
+        if message.get("role") == "user":
+            return message.get("content", "")
+    return ""
+
+
+def _answer_routed_question(client, model, question, plan):
+    """Run a high-confidence data plan, then ask the model to explain it."""
+    result = _run_tool(plan["tool_name"], plan["arguments"])
+    if result.get("error"):
+        return (
+            "I could not complete the requested FPL data lookup. "
+            f"The data source returned: {result['error']}",
+            [plan["tool_name"]],
+        )
+
+    evidence = {
+        "question": question,
+        "intent": plan["intent"],
+        "interpretation": plan["reason"],
+        "data": result,
+    }
+    response = client.responses.create(
+        model=model,
+        instructions=COMPOSER_INSTRUCTIONS,
+        input=[
+            {
+                "role": "user",
+                "content": (
+                    "User question:\n"
+                    f"{question}\n\n"
+                    "Verified FPL evidence:\n"
+                    f"{json.dumps(evidence, default=str)}"
+                ),
+            }
+        ],
+        max_output_tokens=700,
+        store=False,
+    )
+    return response.output_text, [plan["tool_name"]]
+
+
 def answer_fpl_question(messages):
-    """Answer a chat question with bounded, read-only tool calls."""
+    """Answer a chat question with deterministic routing plus safe fallbacks."""
     if not copilot_is_configured():
         raise RuntimeError("FPL Copilot has not been configured yet.")
 
     client = OpenAI(api_key=_get_secret("OPENAI_API_KEY"))
     model = _get_secret("FPL_COPILOT_MODEL", DEFAULT_MODEL)
+    question = _latest_user_question(messages)
+    plan = route_fpl_question(question)
+    if plan:
+        return _answer_routed_question(client, model, question, plan)
+
     input_items = [
         {"role": message["role"], "content": message["content"]}
         for message in messages[-12:]
