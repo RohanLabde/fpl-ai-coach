@@ -926,38 +926,83 @@ def search_fpl_players(query, position=None, limit=8):
 
 
 def get_player_recent_form(player_id, gameweeks=5):
-    """Return the most recent historical gameweeks for one player."""
+    """Return recent finalized FPL form, preferring completed-GW totals."""
     gameweeks = max(1, min(int(gameweeks), 10))
     rows = _read_dataframe(
         """
-        SELECT
-            season,
-            gameweek,
-            player_name,
-            position,
-            team_name,
-            opponent_team_id,
-            was_home,
-            minutes,
-            total_points,
-            goals_scored,
-            assists,
-            clean_sheets,
-            expected_goals,
-            expected_assists,
-            expected_goal_involvements,
-            creativity,
-            threat,
-            defensive_contribution
-        FROM public.player_gameweek
-        WHERE player_id = :player_id
-        ORDER BY season DESC, gameweek DESC, fixture_id DESC
+        WITH completed_gameweeks AS (
+            SELECT
+                season,
+                gameweek,
+                player_name,
+                position,
+                team_name,
+                NULL::integer AS opponent_team_id,
+                NULL::boolean AS was_home,
+                fixture_count,
+                minutes,
+                total_points,
+                goals_scored,
+                assists,
+                clean_sheets,
+                expected_goals,
+                expected_assists,
+                expected_goal_involvements,
+                creativity,
+                threat,
+                defensive_contribution,
+                'completed_gameweek_total' AS data_grain
+            FROM public.fpl_completed_gameweek_stats
+            WHERE player_id = :player_id
+        ),
+        fixture_history AS (
+            SELECT
+                history.season,
+                history.gameweek,
+                history.player_name,
+                history.position,
+                history.team_name,
+                history.opponent_team_id,
+                history.was_home,
+                1 AS fixture_count,
+                history.minutes,
+                history.total_points,
+                history.goals_scored,
+                history.assists,
+                history.clean_sheets,
+                history.expected_goals,
+                history.expected_assists,
+                history.expected_goal_involvements,
+                history.creativity,
+                history.threat,
+                history.defensive_contribution,
+                'historical_fixture' AS data_grain
+            FROM public.player_gameweek AS history
+            WHERE history.player_id = :player_id
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM public.fpl_completed_gameweek_stats AS completed
+                  WHERE completed.player_id = history.player_id
+                    AND completed.season = history.season
+                    AND completed.gameweek = history.gameweek
+              )
+        )
+        SELECT *
+        FROM (
+            SELECT * FROM completed_gameweeks
+            UNION ALL
+            SELECT * FROM fixture_history
+        ) AS form
+        ORDER BY season DESC, gameweek DESC, data_grain
         LIMIT :limit
         """,
         {"player_id": int(player_id), "limit": gameweeks},
     )
     return {
-        "source": "player_gameweek (historical fixture-level data)",
+        "source": (
+            "completed-gameweek totals where available; otherwise "
+            "historical fixture-level data"
+        ),
         "rows": _records(rows),
     }
 
@@ -1066,6 +1111,14 @@ def get_fpl_data_status():
         FROM public.player_gameweek
         """
     )
+    completed_gameweeks = _read_dataframe(
+        """
+        SELECT MAX(season) AS latest_completed_season,
+               MAX(gameweek) AS latest_completed_gameweek,
+               COUNT(*) AS completed_gameweek_player_rows
+        FROM public.fpl_completed_gameweek_stats
+        """
+    )
     features = _read_dataframe(
         """
         SELECT MAX(season) AS latest_feature_season,
@@ -1107,6 +1160,7 @@ def get_fpl_data_status():
         "source": "database coverage and live refresh metadata",
         "players": _records(players),
         "historical_data": _records(history),
+        "completed_gameweek_data": _records(completed_gameweeks),
         "feature_data": _records(features),
         "live_snapshot": _records(live),
         "live_fixtures": _records(fixtures),
