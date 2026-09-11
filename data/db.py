@@ -1098,6 +1098,94 @@ def get_form_leaderboard(metric="points", position=None, limit=10):
     }
 
 
+
+_CURRENT_SEASON_METRICS = {
+    "attacking": "total_xgi",
+    "points": "total_points",
+    "xgi": "total_xgi",
+    "goals": "total_goals",
+    "assists": "total_assists",
+    "threat": "total_threat",
+    "creativity": "total_creativity",
+}
+
+
+def get_current_season_leaderboard(metric="attacking", position=None, limit=10):
+    """Rank players using finalized totals from the active FPL season."""
+    metric = metric.lower()
+    if metric not in _CURRENT_SEASON_METRICS:
+        raise ValueError(
+            f"metric must be one of {sorted(_CURRENT_SEASON_METRICS)}."
+        )
+
+    position = position.upper() if position else None
+    if position and position not in _FPL_POSITIONS:
+        raise ValueError("position must be one of GKP, DEF, MID, or FWD.")
+
+    limit = max(1, min(int(limit), 15))
+    metric_column = _CURRENT_SEASON_METRICS[metric]
+    rows = _read_dataframe(
+        f"""
+        WITH latest_season AS (
+            SELECT MAX(season) AS season
+            FROM public.fpl_completed_gameweek_stats
+        ),
+        totals AS (
+            SELECT
+                stats.player_id,
+                MAX(stats.player_name) AS player_name,
+                MAX(stats.position) AS position,
+                MAX(stats.team_name) AS team_name,
+                COUNT(*) AS completed_gameweeks,
+                SUM(COALESCE(stats.fixture_count, 0)) AS fixtures,
+                SUM(COALESCE(stats.minutes, 0)) AS minutes,
+                SUM(COALESCE(stats.total_points, 0)) AS total_points,
+                SUM(COALESCE(stats.goals_scored, 0)) AS total_goals,
+                SUM(COALESCE(stats.assists, 0)) AS total_assists,
+                SUM(COALESCE(stats.expected_goal_involvements, 0)) AS total_xgi,
+                SUM(COALESCE(stats.threat, 0)) AS total_threat,
+                SUM(COALESCE(stats.creativity, 0)) AS total_creativity
+            FROM public.fpl_completed_gameweek_stats AS stats
+            INNER JOIN latest_season
+                ON stats.season = latest_season.season
+            WHERE (:position IS NULL OR stats.position = :position)
+            GROUP BY stats.player_id
+        )
+        SELECT
+            player_id,
+            player_name,
+            position,
+            team_name,
+            completed_gameweeks,
+            fixtures,
+            minutes,
+            total_points,
+            total_goals,
+            total_assists,
+            total_xgi,
+            total_threat,
+            total_creativity,
+            CASE
+                WHEN minutes > 0 THEN total_xgi * 90.0 / minutes
+            END AS xgi_per_90,
+            {metric_column} AS metric_value
+        FROM totals
+        ORDER BY {metric_column} DESC NULLS LAST,
+                 total_points DESC,
+                 player_name
+        LIMIT :limit
+        """,
+        {"position": position, "limit": limit},
+    )
+    return {
+        "source": (
+            "fpl_completed_gameweek_stats (finalized current-season "
+            "gameweek totals)"
+        ),
+        "metric": metric,
+        "rows": _records(rows),
+    }
+
 def get_fpl_data_status():
     """Describe historical coverage and the newest stored live FPL snapshot."""
     players = _read_dataframe(
