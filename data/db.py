@@ -1098,17 +1098,83 @@ def get_form_leaderboard(metric="points", position=None, limit=10):
     }
 
 
-
-_CURRENT_SEASON_METRICS = {
-    "attacking": "total_xgi",
-    "points": "total_points",
-    "xgi": "total_xgi",
-    "goals": "total_goals",
-    "assists": "total_assists",
-    "threat": "total_threat",
-    "creativity": "total_creativity",
+# Ranking profiles keep ordinary FPL language position-aware.  They are
+# deliberately transparent rather than opaque weighted scores: every profile
+# states the first-order metrics used to order the result.
+_CURRENT_SEASON_RANKINGS = {
+    "attacking": {
+        "order_by": (
+            "total_xgi DESC NULLS LAST, xgi_per_90 DESC NULLS LAST, "
+            "minutes DESC, total_points DESC, player_name"
+        ),
+        "basis": (
+            "Attacking form: total expected goal involvement first, then "
+            "xGI per 90 among players who meet the minutes threshold."
+        ),
+    },
+    "points": {
+        "order_by": "total_points DESC, minutes DESC, player_name",
+        "basis": "FPL points leaders among players who meet the minutes threshold.",
+    },
+    "xgi": {
+        "order_by": (
+            "total_xgi DESC NULLS LAST, xgi_per_90 DESC NULLS LAST, "
+            "minutes DESC, player_name"
+        ),
+        "basis": "Expected goal involvement (xGI), with xGI per 90 as a tiebreaker.",
+    },
+    "goals": {
+        "order_by": "total_goals DESC, minutes DESC, player_name",
+        "basis": "Goals scored among players who meet the minutes threshold.",
+    },
+    "assists": {
+        "order_by": "total_assists DESC, minutes DESC, player_name",
+        "basis": "Assists among players who meet the minutes threshold.",
+    },
+    "threat": {
+        "order_by": "total_threat DESC, threat_per_90 DESC NULLS LAST, minutes DESC, player_name",
+        "basis": "FPL threat, with threat per 90 as a tiebreaker.",
+    },
+    "creativity": {
+        "order_by": (
+            "total_creativity DESC, creativity_per_90 DESC NULLS LAST, "
+            "minutes DESC, player_name"
+        ),
+        "basis": "FPL creativity, with creativity per 90 as a tiebreaker.",
+    },
+    "defensive": {
+        "order_by": (
+            "clean_sheet_rate DESC NULLS LAST, "
+            "defensive_contribution_per_90 DESC NULLS LAST, "
+            "total_clean_sheets DESC, minutes DESC, player_name"
+        ),
+        "basis": (
+            "Defensive form: clean-sheet rate first, then defensive "
+            "contribution per 90. Goals and assists do not determine this ranking."
+        ),
+    },
+    "clean_sheets": {
+        "order_by": "total_clean_sheets DESC, clean_sheet_rate DESC NULLS LAST, minutes DESC, player_name",
+        "basis": "Clean sheets, with clean-sheet rate as a tiebreaker.",
+    },
+    "defensive_contribution": {
+        "order_by": (
+            "defensive_contribution_per_90 DESC NULLS LAST, "
+            "total_defensive_contribution DESC, minutes DESC, player_name"
+        ),
+        "basis": "Defensive contribution per 90, then total defensive contribution.",
+    },
+    "goalkeeping": {
+        "order_by": (
+            "total_clean_sheets DESC, saves_per_90 DESC NULLS LAST, "
+            "goals_conceded_per_90 ASC NULLS LAST, minutes DESC, player_name"
+        ),
+        "basis": (
+            "Goalkeeping form: clean sheets, saves per 90, and fewer goals "
+            "conceded per 90. Goals and assists do not determine this ranking."
+        ),
+    },
 }
-
 
 
 def compare_fpl_players(player_a_id, player_b_id):
@@ -1135,7 +1201,11 @@ def compare_fpl_players(player_a_id, player_b_id):
                 SUM(COALESCE(total_points, 0)) AS season_points,
                 SUM(COALESCE(goals_scored, 0)) AS season_goals,
                 SUM(COALESCE(assists, 0)) AS season_assists,
-                SUM(COALESCE(expected_goal_involvements, 0)) AS season_xgi
+                SUM(COALESCE(clean_sheets, 0)) AS season_clean_sheets,
+                SUM(COALESCE(defensive_contribution, 0)) AS season_defensive_contribution,
+                SUM(COALESCE(saves, 0)) AS season_saves,
+                SUM(COALESCE(expected_goal_involvements, 0)) AS season_xgi,
+                SUM(COALESCE(expected_goals_conceded, 0)) AS season_xgc
             FROM public.fpl_completed_gameweek_stats
             INNER JOIN latest_season
                 ON fpl_completed_gameweek_stats.season = latest_season.season
@@ -1157,11 +1227,25 @@ def compare_fpl_players(player_a_id, player_b_id):
             COALESCE(totals.season_points, 0) AS season_points,
             COALESCE(totals.season_goals, 0) AS season_goals,
             COALESCE(totals.season_assists, 0) AS season_assists,
+            COALESCE(totals.season_clean_sheets, 0) AS season_clean_sheets,
+            COALESCE(totals.season_defensive_contribution, 0)
+                AS season_defensive_contribution,
+            COALESCE(totals.season_saves, 0) AS season_saves,
             COALESCE(totals.season_xgi, 0) AS season_xgi,
+            COALESCE(totals.season_xgc, 0) AS season_xgc,
             CASE
                 WHEN COALESCE(totals.season_minutes, 0) > 0
                     THEN totals.season_xgi * 90.0 / totals.season_minutes
-            END AS season_xgi_per_90
+            END AS season_xgi_per_90,
+            CASE
+                WHEN COALESCE(totals.season_minutes, 0) > 0
+                    THEN totals.season_defensive_contribution * 90.0
+                         / totals.season_minutes
+            END AS season_defensive_contribution_per_90,
+            CASE
+                WHEN COALESCE(totals.season_minutes, 0) > 0
+                    THEN totals.season_saves * 90.0 / totals.season_minutes
+            END AS season_saves_per_90
         FROM public.fpl_live_player_snapshots AS live
         INNER JOIN latest_live_snapshot
             ON live.snapshot_at = latest_live_snapshot.snapshot_at
@@ -1180,12 +1264,15 @@ def compare_fpl_players(player_a_id, player_b_id):
         "rows": _records(rows),
     }
 
-def get_current_season_leaderboard(metric="attacking", position=None, limit=10):
-    """Rank players using finalized totals from the active FPL season."""
+
+def get_current_season_leaderboard(
+    metric="attacking", position=None, limit=10, minimum_minutes=180
+):
+    """Rank current-season players using transparent, position-aware profiles."""
     metric = metric.lower()
-    if metric not in _CURRENT_SEASON_METRICS:
+    if metric not in _CURRENT_SEASON_RANKINGS:
         raise ValueError(
-            f"metric must be one of {sorted(_CURRENT_SEASON_METRICS)}."
+            f"metric must be one of {sorted(_CURRENT_SEASON_RANKINGS)}."
         )
 
     position = position.upper() if position else None
@@ -1193,7 +1280,9 @@ def get_current_season_leaderboard(metric="attacking", position=None, limit=10):
         raise ValueError("position must be one of GKP, DEF, MID, or FWD.")
 
     limit = max(1, min(int(limit), 15))
-    metric_column = _CURRENT_SEASON_METRICS[metric]
+    minimum_minutes = max(0, min(int(minimum_minutes), 2_700))
+    profile = _CURRENT_SEASON_RANKINGS[metric]
+
     rows = _read_dataframe(
         f"""
         WITH latest_season AS (
@@ -1209,10 +1298,17 @@ def get_current_season_leaderboard(metric="attacking", position=None, limit=10):
                 COUNT(*) AS completed_gameweeks,
                 SUM(COALESCE(stats.fixture_count, 0)) AS fixtures,
                 SUM(COALESCE(stats.minutes, 0)) AS minutes,
+                SUM(COALESCE(stats.starts, 0)) AS starts,
                 SUM(COALESCE(stats.total_points, 0)) AS total_points,
                 SUM(COALESCE(stats.goals_scored, 0)) AS total_goals,
                 SUM(COALESCE(stats.assists, 0)) AS total_assists,
+                SUM(COALESCE(stats.clean_sheets, 0)) AS total_clean_sheets,
+                SUM(COALESCE(stats.goals_conceded, 0)) AS total_goals_conceded,
+                SUM(COALESCE(stats.saves, 0)) AS total_saves,
+                SUM(COALESCE(stats.defensive_contribution, 0))
+                    AS total_defensive_contribution,
                 SUM(COALESCE(stats.expected_goal_involvements, 0)) AS total_xgi,
+                SUM(COALESCE(stats.expected_goals_conceded, 0)) AS total_xgc,
                 SUM(COALESCE(stats.threat, 0)) AS total_threat,
                 SUM(COALESCE(stats.creativity, 0)) AS total_creativity
             FROM public.fpl_completed_gameweek_stats AS stats
@@ -1220,32 +1316,47 @@ def get_current_season_leaderboard(metric="attacking", position=None, limit=10):
                 ON stats.season = latest_season.season
             WHERE (:position IS NULL OR stats.position = :position)
             GROUP BY stats.player_id
+        ),
+        ranked AS (
+            SELECT
+                *,
+                CASE WHEN fixtures > 0
+                    THEN total_clean_sheets * 1.0 / fixtures
+                END AS clean_sheet_rate,
+                CASE WHEN minutes > 0
+                    THEN total_defensive_contribution * 90.0 / minutes
+                END AS defensive_contribution_per_90,
+                CASE WHEN minutes > 0
+                    THEN total_saves * 90.0 / minutes
+                END AS saves_per_90,
+                CASE WHEN minutes > 0
+                    THEN total_goals_conceded * 90.0 / minutes
+                END AS goals_conceded_per_90,
+                CASE WHEN minutes > 0
+                    THEN total_xgc * 90.0 / minutes
+                END AS xgc_per_90,
+                CASE WHEN minutes > 0
+                    THEN total_xgi * 90.0 / minutes
+                END AS xgi_per_90,
+                CASE WHEN minutes > 0
+                    THEN total_threat * 90.0 / minutes
+                END AS threat_per_90,
+                CASE WHEN minutes > 0
+                    THEN total_creativity * 90.0 / minutes
+                END AS creativity_per_90
+            FROM totals
+            WHERE minutes >= :minimum_minutes
         )
-        SELECT
-            player_id,
-            player_name,
-            position,
-            team_name,
-            completed_gameweeks,
-            fixtures,
-            minutes,
-            total_points,
-            total_goals,
-            total_assists,
-            total_xgi,
-            total_threat,
-            total_creativity,
-            CASE
-                WHEN minutes > 0 THEN total_xgi * 90.0 / minutes
-            END AS xgi_per_90,
-            {metric_column} AS metric_value
-        FROM totals
-        ORDER BY {metric_column} DESC NULLS LAST,
-                 total_points DESC,
-                 player_name
+        SELECT *
+        FROM ranked
+        ORDER BY {profile["order_by"]}
         LIMIT :limit
         """,
-        {"position": position, "limit": limit},
+        {
+            "position": position,
+            "limit": limit,
+            "minimum_minutes": minimum_minutes,
+        },
     )
     return {
         "source": (
@@ -1253,8 +1364,11 @@ def get_current_season_leaderboard(metric="attacking", position=None, limit=10):
             "gameweek totals)"
         ),
         "metric": metric,
+        "ranking_basis": profile["basis"],
+        "minimum_minutes": minimum_minutes,
         "rows": _records(rows),
     }
+
 
 def get_fpl_data_status():
     """Describe historical coverage and the newest stored live FPL snapshot."""
