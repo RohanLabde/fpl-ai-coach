@@ -51,7 +51,7 @@ def _ranking_metric(question):
 
 def _requested_limit(question):
     """Use an explicitly requested top-N value, otherwise a helpful default."""
-    match = re.search(r"\\b(?:top|best)\s+(\d{1,2})\\b", question)
+    match = re.search(r"\b(?:top|best)\s+(\d{1,2})\b", question)
     if not match:
         return 10
     return max(1, min(int(match.group(1)), 15))
