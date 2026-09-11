@@ -5,6 +5,7 @@ import json
 import streamlit as st
 
 from data.db import (
+    get_current_season_leaderboard,
     get_fpl_data_status,
     get_form_leaderboard,
     get_latest_feature_snapshot,
@@ -44,6 +45,13 @@ availability, ownership, current team, or upcoming fixtures. Use completed
 gameweek totals for finalized current-season performance and player_gameweek
 for older fixture-level history. State the snapshot time when data came from a
 live snapshot.
+
+Interpret ordinary FPL language helpfully. "Top" or "best" means return a
+ranking, not a clarification request. For "best attacking [position] this
+season", infer the FPL position and use the current-season leaderboard with
+metric="attacking" (total xGI) and the requested count, defaulting to 10.
+Only ask a follow-up when the request genuinely cannot be answered from the
+available data.
 
 Do not call the same function more than once for a single answer. If a player
 search returns an empty rows list, immediately explain that the player is not
@@ -98,6 +106,28 @@ TOOLS = [
             "type": "object",
             "properties": {"player_id": {"type": "integer"}},
             "required": ["player_id"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "type": "function",
+        "name": "get_current_season_leaderboard",
+        "description": "Rank players from finalized current-season gameweek totals. Use metric='attacking' for a natural-language request such as 'best attacking midfielders'.",
+        "strict": True,
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "metric": {
+                    "type": "string",
+                    "enum": ["attacking", "points", "xgi", "goals", "assists", "threat", "creativity"],
+                },
+                "position": {
+                    "type": ["string", "null"],
+                    "enum": ["GKP", "DEF", "MID", "FWD", None],
+                },
+                "limit": {"type": "integer", "minimum": 1, "maximum": 15},
+            },
+            "required": ["metric", "position", "limit"],
             "additionalProperties": False,
         },
     },
@@ -167,6 +197,7 @@ TOOLS = [
 
 TOOL_HANDLERS = {
     "search_fpl_players": search_fpl_players,
+    "get_current_season_leaderboard": get_current_season_leaderboard,
     "get_player_recent_form": get_player_recent_form,
     "get_latest_feature_snapshot": get_latest_feature_snapshot,
     "get_live_player_profile": get_live_player_profile,
