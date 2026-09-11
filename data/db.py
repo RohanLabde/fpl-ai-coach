@@ -1110,6 +1110,76 @@ _CURRENT_SEASON_METRICS = {
 }
 
 
+
+def compare_fpl_players(player_a_id, player_b_id):
+    """Return one comparable live and current-season row for each player."""
+    player_a_id = int(player_a_id)
+    player_b_id = int(player_b_id)
+    if player_a_id == player_b_id:
+        raise ValueError("Choose two different FPL players to compare.")
+
+    rows = _read_dataframe(
+        """
+        WITH latest_live_snapshot AS (
+            SELECT MAX(snapshot_at) AS snapshot_at
+            FROM public.fpl_live_player_snapshots
+        ),
+        latest_season AS (
+            SELECT MAX(season) AS season
+            FROM public.fpl_completed_gameweek_stats
+        ),
+        season_totals AS (
+            SELECT
+                player_id,
+                SUM(COALESCE(minutes, 0)) AS season_minutes,
+                SUM(COALESCE(total_points, 0)) AS season_points,
+                SUM(COALESCE(goals_scored, 0)) AS season_goals,
+                SUM(COALESCE(assists, 0)) AS season_assists,
+                SUM(COALESCE(expected_goal_involvements, 0)) AS season_xgi
+            FROM public.fpl_completed_gameweek_stats
+            INNER JOIN latest_season
+                ON fpl_completed_gameweek_stats.season = latest_season.season
+            WHERE player_id IN (:player_a_id, :player_b_id)
+            GROUP BY player_id
+        )
+        SELECT
+            live.player_id,
+            COALESCE(live.web_name,
+                     CONCAT_WS(' ', live.first_name, live.second_name)) AS player_name,
+            live.position,
+            live.team_name,
+            live.price,
+            live.status,
+            live.chance_of_playing_next_round,
+            live.selected_by_percent,
+            live.snapshot_at,
+            COALESCE(totals.season_minutes, 0) AS season_minutes,
+            COALESCE(totals.season_points, 0) AS season_points,
+            COALESCE(totals.season_goals, 0) AS season_goals,
+            COALESCE(totals.season_assists, 0) AS season_assists,
+            COALESCE(totals.season_xgi, 0) AS season_xgi,
+            CASE
+                WHEN COALESCE(totals.season_minutes, 0) > 0
+                    THEN totals.season_xgi * 90.0 / totals.season_minutes
+            END AS season_xgi_per_90
+        FROM public.fpl_live_player_snapshots AS live
+        INNER JOIN latest_live_snapshot
+            ON live.snapshot_at = latest_live_snapshot.snapshot_at
+        LEFT JOIN season_totals AS totals
+            ON totals.player_id = live.player_id
+        WHERE live.player_id IN (:player_a_id, :player_b_id)
+        ORDER BY live.player_id
+        """,
+        {"player_a_id": player_a_id, "player_b_id": player_b_id},
+    )
+    return {
+        "source": (
+            "latest live player snapshot plus finalized current-season "
+            "gameweek totals"
+        ),
+        "rows": _records(rows),
+    }
+
 def get_current_season_leaderboard(metric="attacking", position=None, limit=10):
     """Rank players using finalized totals from the active FPL season."""
     metric = metric.lower()
