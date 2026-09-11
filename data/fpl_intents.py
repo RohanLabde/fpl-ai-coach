@@ -1,7 +1,8 @@
 """Deterministic routing for common FPL questions.
 
-The router deliberately handles only high-confidence patterns. Questions outside
-those patterns continue to the general grounded tool workflow.
+The router handles only high-confidence patterns.  It maps natural FPL language
+to transparent, position-aware ranking profiles; questions outside those
+patterns continue to the general grounded tool workflow.
 """
 
 import re
@@ -25,6 +26,15 @@ _DATA_STATUS_WORDS = (
     "latest data",
 )
 
+# These are answer-design defaults, not claims that other metrics are irrelevant.
+# A request for a different explicit metric always overrides the profile.
+_POSITION_DEFAULT_METRICS = {
+    "GKP": "goalkeeping",
+    "DEF": "defensive",
+    "MID": "attacking",
+    "FWD": "attacking",
+}
+
 
 def _position_from_question(question):
     """Return an FPL position code when the wording is unambiguous."""
@@ -34,10 +44,19 @@ def _position_from_question(question):
     return None
 
 
-def _ranking_metric(question):
-    """Map ordinary FPL wording to one transparent leaderboard metric."""
+def _ranking_metric(question, position):
+    """Map ordinary FPL wording to a transparent, position-aware metric."""
+    # Explicit user intent always has priority over a positional default.
+    if "clean sheet" in question:
+        return "clean_sheets"
+    if "defensive contribution" in question or "defensive form" in question:
+        return "defensive_contribution"
+    if "goalkeeper" in question or "goalkeeping" in question or "keeper" in question:
+        return "goalkeeping"
     if "attacking" in question or "xgi" in question or "expected goal involvement" in question:
         return "attacking"
+    if "fpl points" in question or "total points" in question or "points leader" in question:
+        return "points"
     if "assist" in question:
         return "assists"
     if "goal" in question:
@@ -46,7 +65,7 @@ def _ranking_metric(question):
         return "threat"
     if "creativity" in question or "creative" in question:
         return "creativity"
-    return "points"
+    return _POSITION_DEFAULT_METRICS.get(position, "points")
 
 
 def _requested_limit(question):
@@ -69,23 +88,26 @@ def route_fpl_question(question):
             "reason": "The question asks about available FPL data or freshness.",
         }
 
-    is_ranking = any(word in normalized for word in _RANKING_WORDS)
+    is_ranking = any(re.search(r"\b" + re.escape(word) + r"\b", normalized)
+                     for word in _RANKING_WORDS)
     is_current_season = any(
         phrase in normalized for phrase in _CURRENT_SEASON_WORDS
     )
     if is_ranking and is_current_season:
-        metric = _ranking_metric(normalized)
+        position = _position_from_question(normalized)
+        metric = _ranking_metric(normalized, position)
         return {
             "intent": "current_season_leaderboard",
             "tool_name": "get_current_season_leaderboard",
             "arguments": {
                 "metric": metric,
-                "position": _position_from_question(normalized),
+                "position": position,
                 "limit": _requested_limit(normalized),
             },
             "reason": (
-                "The question is an explicit current-season FPL ranking with "
-                "a supported default metric."
+                "The question is an explicit current-season FPL ranking. "
+                "The selected ranking profile is position-aware unless the "
+                "user supplied a more specific metric."
             ),
         }
 
