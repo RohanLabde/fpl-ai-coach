@@ -56,7 +56,7 @@ defensive contribution per 90), the goalkeeping profile for goalkeepers
 for unspecified midfielders and forwards (xGI, with xGI per 90 as a
 tiebreaker). A user can explicitly ask for FPL points, goals, assists, clean
 sheets, threat, creativity, or a defensive-contribution ranking. State the
-ranking basis and the minimum-minutes qualification; do not present early
+ranking basis and the minimum-starts qualification; do not present early
 season results as definitive. Only ask a follow-up when the request genuinely
 cannot be answered from the available data.
 
