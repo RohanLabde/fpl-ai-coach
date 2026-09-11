@@ -5,6 +5,7 @@ import json
 import streamlit as st
 
 from data.db import (
+    compare_fpl_players,
     get_current_season_leaderboard,
     get_fpl_data_status,
     get_form_leaderboard,
@@ -54,8 +55,9 @@ metric="attacking" (total xGI) and the requested count, defaulting to 10.
 Only ask a follow-up when the request genuinely cannot be answered from the
 available data.
 
-Do not call the same function more than once for a single answer. If a player
-search returns an empty rows list, immediately explain that the player is not
+Do not repeat an identical function call with the same arguments. You may use
+separate player searches when comparing players. If a player search returns an
+empty rows list, immediately explain that the player is not
 in the latest imported player snapshot; do not retry alternative spellings
 unless the user explicitly asks. Use no more than three data functions, then
 answer using the returned evidence.
@@ -80,6 +82,21 @@ TOOLS = [
                 "limit": {"type": "integer", "minimum": 1, "maximum": 10},
             },
             "required": ["query", "position", "limit"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "type": "function",
+        "name": "compare_fpl_players",
+        "description": "Compare two identified FPL players using their latest live profile and finalized current-season totals. Search by name first to obtain player IDs.",
+        "strict": True,
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "player_a_id": {"type": "integer"},
+                "player_b_id": {"type": "integer"},
+            },
+            "required": ["player_a_id", "player_b_id"],
             "additionalProperties": False,
         },
     },
@@ -198,6 +215,7 @@ TOOLS = [
 
 TOOL_HANDLERS = {
     "search_fpl_players": search_fpl_players,
+    "compare_fpl_players": compare_fpl_players,
     "get_current_season_leaderboard": get_current_season_leaderboard,
     "get_player_recent_form": get_player_recent_form,
     "get_latest_feature_snapshot": get_latest_feature_snapshot,
@@ -344,12 +362,17 @@ def answer_fpl_question(messages):
             # The model can occasionally request the same source while it is
             # composing an answer. Reuse the first read-only result instead of
             # returning an unhelpful safety-limit message to the user.
-            if call.name in tool_results:
-                result = tool_results[call.name]
+            tool_key = (
+                call.name,
+                json.dumps(arguments, sort_keys=True, default=str),
+            )
+            if tool_key in tool_results:
+                result = tool_results[tool_key]
             else:
                 result = _run_tool(call.name, arguments)
-                tool_results[call.name] = result
-                consulted_sources.append(call.name)
+                tool_results[tool_key] = result
+                if call.name not in consulted_sources:
+                    consulted_sources.append(call.name)
 
             if call.name == "search_fpl_players" and not result.get("rows"):
                 return _empty_search_answer(arguments), consulted_sources
