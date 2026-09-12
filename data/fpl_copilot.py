@@ -16,6 +16,7 @@ from data.db import (
     search_fpl_players,
 )
 from data.fpl_intents import route_fpl_question
+from data.fpl_query_planner import plan_fpl_question
 
 try:
     from openai import OpenAI
@@ -24,200 +25,6 @@ except ImportError:  # Keep the rest of the Streamlit app usable until installed
 
 
 DEFAULT_MODEL = "gpt-5-mini"
-MAX_TOOL_ROUNDS = 3
-
-SYSTEM_INSTRUCTIONS = """
-You are FPL Copilot, a careful Fantasy Premier League research assistant.
-
-Answer only FPL questions. Use the supplied database functions before making
-factual claims about a player, form, fixtures, price, or model feature data.
-Do not claim that historical data is live. The function output labels each
-source: repeat that limitation whenever it is relevant. In particular,
-prediction_features contains historical feature snapshots, not a current live
-forecast. Do not fabricate injuries, line-ups, future fixtures, rules, prices,
-or recommendation rankings when they have not been supplied by a function.
-
-Keep answers concise and practical. Explain uncertainty, distinguish observed
-statistics from inference, and never imply that you can execute transfers.
-If the data cannot answer a request, say exactly what is missing and suggest a
-grounded next question.
-
-Use live snapshot and fixture sources for questions about current price,
-availability, ownership, current team, or upcoming fixtures. Use completed
-gameweek totals for finalized current-season performance and player_gameweek
-for older fixture-level history. State the snapshot time when data came from a
-live snapshot.
-
-Interpret ordinary FPL language helpfully. "Top" or "best" means return a
-ranking, not a clarification request. Rankings are position-aware: use the
-defensive profile for an unspecified defender ranking (clean-sheet rate and
-defensive contribution per 90), the goalkeeping profile for goalkeepers
-(clean sheets, saves per 90, and goals conceded per 90), and attacking form
-for unspecified midfielders and forwards (xGI, with xGI per 90 as a
-tiebreaker). A user can explicitly ask for FPL points, goals, assists, clean
-sheets, threat, creativity, or a defensive-contribution ranking. State the
-ranking basis and the minimum-starts qualification; do not present early
-season results as definitive. Only ask a follow-up when the request genuinely
-cannot be answered from the available data.
-
-Do not repeat an identical function call with the same arguments. You may use
-separate player searches when comparing players. If a player search returns an
-empty rows list, immediately explain that the player is not
-in the latest imported player snapshot; do not retry alternative spellings
-unless the user explicitly asks. Use no more than three data functions, then
-answer using the returned evidence.
-""".strip()
-
-
-TOOLS = [
-    {
-        "type": "function",
-        "name": "search_fpl_players",
-        "description": "Find a player by name. Searches the current FPL snapshot first, then the historical player index when absent.",
-        "strict": True,
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "query": {"type": "string", "description": "Player name or partial name."},
-                "position": {
-                    "type": ["string", "null"],
-                    "enum": ["GKP", "DEF", "MID", "FWD", None],
-                    "description": "Optional FPL position.",
-                },
-                "limit": {"type": "integer", "minimum": 1, "maximum": 10},
-            },
-            "required": ["query", "position", "limit"],
-            "additionalProperties": False,
-        },
-    },
-    {
-        "type": "function",
-        "name": "compare_fpl_players",
-        "description": "Compare two identified FPL players using their latest live profile and finalized current-season totals. Search by name first to obtain player IDs.",
-        "strict": True,
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "player_a_id": {"type": "integer"},
-                "player_b_id": {"type": "integer"},
-            },
-            "required": ["player_a_id", "player_b_id"],
-            "additionalProperties": False,
-        },
-    },
-    {
-        "type": "function",
-        "name": "get_player_recent_form",
-        "description": "Get recent finalized form for one player. Completed gameweeks are returned as exact gameweek totals; older history can be fixture-level.",
-        "strict": True,
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "player_id": {"type": "integer"},
-                "gameweeks": {"type": "integer", "minimum": 1, "maximum": 10},
-            },
-            "required": ["player_id", "gameweeks"],
-            "additionalProperties": False,
-        },
-    },
-    {
-        "type": "function",
-        "name": "get_latest_feature_snapshot",
-        "description": "Get the latest available historical model feature snapshot for one player. This is not a live prediction.",
-        "strict": True,
-        "parameters": {
-            "type": "object",
-            "properties": {"player_id": {"type": "integer"}},
-            "required": ["player_id"],
-            "additionalProperties": False,
-        },
-    },
-    {
-        "type": "function",
-        "name": "get_current_season_leaderboard",
-        "description": "Rank players from finalized current-season gameweek totals using a transparent profile. For unspecified defenders use 'defensive'; for goalkeepers use 'goalkeeping'; for attacking midfielders or forwards use 'attacking'.",
-        "strict": True,
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "metric": {
-                    "type": "string",
-                    "enum": ["attacking", "points", "xgi", "goals", "assists", "threat", "creativity", "defensive", "clean_sheets", "defensive_contribution", "goalkeeping"],
-                },
-                "position": {
-                    "type": ["string", "null"],
-                    "enum": ["GKP", "DEF", "MID", "FWD", None],
-                },
-                "limit": {"type": "integer", "minimum": 1, "maximum": 15},
-            },
-            "required": ["metric", "position", "limit"],
-            "additionalProperties": False,
-        },
-    },
-    {
-        "type": "function",
-        "name": "get_form_leaderboard",
-        "description": "Rank players from the latest available historical feature snapshot by a selected form metric. This is not a live recommendation.",
-        "strict": True,
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "metric": {
-                    "type": "string",
-                    "enum": ["points", "xgi", "minutes", "threat", "creativity", "defensive_contribution"],
-                },
-                "position": {
-                    "type": ["string", "null"],
-                    "enum": ["GKP", "DEF", "MID", "FWD", None],
-                },
-                "limit": {"type": "integer", "minimum": 1, "maximum": 15},
-            },
-            "required": ["metric", "position", "limit"],
-            "additionalProperties": False,
-        },
-    },
-    {
-        "type": "function",
-        "name": "get_live_player_profile",
-        "description": "Get the latest stored live FPL snapshot for a player, including price, availability, ownership and the snapshot timestamp.",
-        "strict": True,
-        "parameters": {
-            "type": "object",
-            "properties": {"player_id": {"type": "integer"}},
-            "required": ["player_id"],
-            "additionalProperties": False,
-        },
-    },
-    {
-        "type": "function",
-        "name": "get_player_upcoming_fixtures",
-        "description": "Get upcoming fixtures from the stored live FPL fixture feed for one player.",
-        "strict": True,
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "player_id": {"type": "integer"},
-                "limit": {"type": "integer", "minimum": 1, "maximum": 8},
-            },
-            "required": ["player_id", "limit"],
-            "additionalProperties": False,
-        },
-    },
-    {
-        "type": "function",
-        "name": "get_fpl_data_status",
-        "description": "Check database coverage and freshness before answering a time-sensitive question.",
-        "strict": True,
-        "parameters": {
-            "type": "object",
-            "properties": {},
-            "required": [],
-            "additionalProperties": False,
-        },
-    },
-]
-
-
 TOOL_HANDLERS = {
     "search_fpl_players": search_fpl_players,
     "compare_fpl_players": compare_fpl_players,
@@ -253,18 +60,6 @@ def _run_tool(name, arguments):
         return {"error": f"Data lookup failed: {error}"}
 
 
-def _empty_search_answer(arguments):
-    """Avoid spending more tool calls when a player is absent from the index."""
-    query = arguments.get("query", "that player").strip() or "that player"
-    return (
-        f"I could not find **{query}** in the latest imported player snapshot. "
-        "That does not prove the player has no historical data; it means the "
-        "current player index does not contain a matching name. The scheduled "
-        "FPL refresh may not yet include that player; try the FPL player ID or "
-        "ask again after the next refresh."
-    )
-
-
 COMPOSER_INSTRUCTIONS = """
 You are the final-answer writer for FPL Copilot. A deterministic FPL data plan
 has already run and the supplied evidence is authoritative for this answer.
@@ -288,20 +83,12 @@ def _latest_user_question(messages):
     return ""
 
 
-def _answer_routed_question(client, model, question, plan):
-    """Run a high-confidence data plan, then ask the model to explain it."""
-    result = _run_tool(plan["tool_name"], plan["arguments"])
-    if result.get("error"):
-        return (
-            "I could not complete the requested FPL data lookup. "
-            f"The data source returned: {result['error']}",
-            [plan["tool_name"]],
-        )
-
+def _compose_evidence_answer(client, model, question, plan, result, sources):
+    """Write a grounded answer only after the validated read-only lookup."""
     evidence = {
         "question": question,
-        "intent": plan["intent"],
-        "interpretation": plan["reason"],
+        "intent": plan.get("intent"),
+        "interpretation": plan.get("reason") or plan.get("scope"),
         "data": result,
     }
     response = client.responses.create(
@@ -321,89 +108,179 @@ def _answer_routed_question(client, model, question, plan):
         max_output_tokens=700,
         store=False,
     )
-    return response.output_text, [plan["tool_name"]]
+    return response.output_text, sources
+
+
+def _answer_routed_question(client, model, question, plan):
+    """Run a deterministic high-confidence data plan."""
+    result = _run_tool(plan["tool_name"], plan["arguments"])
+    if result.get("error"):
+        return (
+            "I could not complete the requested FPL data lookup. "
+            f"The data source returned: {result['error']}",
+            [plan["tool_name"]],
+        )
+    return _compose_evidence_answer(
+        client, model, question, plan, result, [plan["tool_name"]]
+    )
+
+
+def _resolve_planned_player(name):
+    """Resolve one explicit player name without silently choosing an ambiguity."""
+    result = _run_tool(
+        "search_fpl_players",
+        {"query": name, "position": None, "limit": 8},
+    )
+    if result.get("error"):
+        return None, result, "I could not search the FPL player index right now."
+
+    rows = result.get("rows", [])
+    if not rows:
+        return (
+            None,
+            result,
+            f"I could not find **{name}** in the current or historical FPL player index.",
+        )
+
+    normalized_name = " ".join(name.casefold().split())
+    exact = [
+        row for row in rows
+        if " ".join(str(row.get("player_name", "")).casefold().split())
+        == normalized_name
+    ]
+    if len(exact) == 1:
+        return exact[0], result, None
+    if len(rows) == 1:
+        return rows[0], result, None
+
+    choices = ", ".join(
+        f"{row.get('player_name')} ({row.get('team_name', 'unknown team')})"
+        for row in rows[:5]
+    )
+    return None, result, (
+        f"I found several matches for **{name}**: {choices}. "
+        "Please specify the player's full name or team."
+    )
+
+
+def _conversation_context(messages):
+    """Provide the planner with a compact recent conversation, not raw history."""
+    recent = messages[-6:]
+    lines = [
+        f"{message.get('role', 'user')}: {message.get('content', '')}"
+        for message in recent
+    ]
+    return "\n".join(lines)[-4_000:]
+
+
+def _answer_planned_question(client, model, question, messages):
+    """Plan, validate, resolve, then execute only a permitted read-only lookup."""
+    plan = plan_fpl_question(
+        client,
+        model,
+        question,
+        conversation_context=_conversation_context(messages),
+    )
+
+    if plan["intent"] == "unsupported" or plan["needs_clarification"]:
+        return (
+            plan["clarification"]
+            or (
+                "I cannot answer that reliably with the FPL data currently "
+                "available. Try a player, form, fixture, or current-season "
+                "ranking question."
+            ),
+            [],
+        )
+
+    if plan["intent"] == "data_status":
+        result = _run_tool("get_fpl_data_status", {})
+        sources = ["get_fpl_data_status"]
+    elif plan["intent"] == "leaderboard":
+        result = _run_tool(
+            "get_current_season_leaderboard",
+            {
+                "metric": plan["metric"] or "points",
+                "position": plan["position"],
+                "limit": plan["limit"],
+            },
+        )
+        sources = ["get_current_season_leaderboard"]
+    elif plan["intent"] in {
+        "player_form",
+        "player_profile",
+        "upcoming_fixtures",
+    }:
+        player, _search_result, message = _resolve_planned_player(
+            plan["player_names"][0]
+        )
+        if message:
+            return message, ["search_fpl_players"]
+
+        tool_by_intent = {
+            "player_form": "get_player_recent_form",
+            "player_profile": "get_live_player_profile",
+            "upcoming_fixtures": "get_player_upcoming_fixtures",
+        }
+        tool_name = tool_by_intent[plan["intent"]]
+        arguments = {"player_id": int(player["player_id"])}
+        if tool_name == "get_player_recent_form":
+            arguments["gameweeks"] = plan["gameweeks"]
+        if tool_name == "get_player_upcoming_fixtures":
+            arguments["limit"] = min(plan["limit"], 8)
+        result = _run_tool(tool_name, arguments)
+        sources = ["search_fpl_players", tool_name]
+    elif plan["intent"] == "compare_players":
+        first, _first_search, first_message = _resolve_planned_player(
+            plan["player_names"][0]
+        )
+        if first_message:
+            return first_message, ["search_fpl_players"]
+        second, _second_search, second_message = _resolve_planned_player(
+            plan["player_names"][1]
+        )
+        if second_message:
+            return second_message, ["search_fpl_players"]
+        result = _run_tool(
+            "compare_fpl_players",
+            {
+                "player_a_id": int(first["player_id"]),
+                "player_b_id": int(second["player_id"]),
+            },
+        )
+        sources = ["search_fpl_players", "compare_fpl_players"]
+    else:
+        return (
+            "I could not map that question to a supported FPL data lookup.",
+            [],
+        )
+
+    if result.get("error"):
+        return (
+            "I could not complete the requested FPL data lookup. "
+            f"The data source returned: {result['error']}",
+            sources,
+        )
+    return _compose_evidence_answer(
+        client, model, question, plan, result, sources
+    )
 
 
 def answer_fpl_question(messages):
-    """Answer a chat question with deterministic routing plus safe fallbacks."""
+    """Answer through deterministic routing or a validated structured plan."""
     if not copilot_is_configured():
         raise RuntimeError("FPL Copilot has not been configured yet.")
 
     client = OpenAI(api_key=_get_secret("OPENAI_API_KEY"))
     model = _get_secret("FPL_COPILOT_MODEL", DEFAULT_MODEL)
     question = _latest_user_question(messages)
-    plan = route_fpl_question(question)
-    if plan:
-        return _answer_routed_question(client, model, question, plan)
 
-    input_items = [
-        {"role": message["role"], "content": message["content"]}
-        for message in messages[-12:]
-    ]
-    consulted_sources = []
-    tool_results = {}
-
-    for _ in range(MAX_TOOL_ROUNDS):
-        response = client.responses.create(
-            model=model,
-            instructions=SYSTEM_INSTRUCTIONS,
-            input=input_items,
-            tools=TOOLS,
-            parallel_tool_calls=False,
-            max_output_tokens=700,
-            store=False,
+    deterministic_plan = route_fpl_question(question)
+    if deterministic_plan:
+        return _answer_routed_question(
+            client, model, question, deterministic_plan
         )
-        function_calls = [
-            item for item in response.output if item.type == "function_call"
-        ]
-        if not function_calls:
-            return response.output_text, consulted_sources
-
-        input_items.extend(response.output)
-        for call in function_calls:
-            try:
-                arguments = json.loads(call.arguments)
-            except json.JSONDecodeError:
-                arguments = {}
-
-            # The model can occasionally request the same source while it is
-            # composing an answer. Reuse the first read-only result instead of
-            # returning an unhelpful safety-limit message to the user.
-            tool_key = (
-                call.name,
-                json.dumps(arguments, sort_keys=True, default=str),
-            )
-            if tool_key in tool_results:
-                result = tool_results[tool_key]
-            else:
-                result = _run_tool(call.name, arguments)
-                tool_results[tool_key] = result
-                if call.name not in consulted_sources:
-                    consulted_sources.append(call.name)
-
-            if call.name == "search_fpl_players" and not result.get("rows"):
-                return _empty_search_answer(arguments), consulted_sources
-
-            if result.get("error"):
-                return (
-                    "I could not complete the requested FPL data lookup. "
-                    f"The data source returned: {result['error']}",
-                    consulted_sources,
-                )
-
-            input_items.append(
-                {
-                    "type": "function_call_output",
-                    "call_id": call.call_id,
-                    "output": json.dumps(result, default=str),
-                }
-            )
-
-    return (
-        "I could not complete the data lookup within the safety limit. "
-        "Please ask a narrower FPL question.",
-        consulted_sources,
-    )
+    return _answer_planned_question(client, model, question, messages)
 
 
 def _data_freshness_caption():
