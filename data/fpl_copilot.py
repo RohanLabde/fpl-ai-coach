@@ -191,12 +191,81 @@ def _fallback_leaderboard_answer(plan, result):
     return "\n".join(lines)
 
 
+def _fallback_fixture_horizon_answer(result):
+    """Render an upcoming team-fixture ranking without relying on the writer."""
+    rows = result.get("rows", [])
+    if not rows:
+        return "I found no upcoming team fixtures in the stored live schedule."
+
+    horizon = result.get("horizon", 5)
+    basis = result.get("ranking_basis", "average fixture difficulty")
+    lines = [
+        f"**Ranking basis: {basis}.**",
+        "Lower FDR means an easier fixture run.",
+        "",
+    ]
+    for rank, row in enumerate(rows, start=1):
+        lines.append(
+            f"{rank}. **{row.get('team_name', 'Unknown team')}** — "
+            f"average FDR {_format_value(row.get('average_fdr'), 2)}; "
+            f"{_format_value(row.get('home_fixtures'), 0)} home and "
+            f"{_format_value(row.get('away_fixtures'), 0)} away across "
+            f"the next {horizon} fixtures. "
+            f"Run: {row.get('upcoming_fixtures', '—')}."
+        )
+    return "\n".join(lines)
+
+
+def _fallback_team_strength_answer(result):
+    """Render an attacking or defensive team-form ranking deterministically."""
+    rows = result.get("rows", [])
+    if not rows:
+        return "I found no finalized team form data for that period."
+
+    metric = result.get("metric", "attacking")
+    gameweeks = result.get("gameweeks", 5)
+    basis = result.get("ranking_basis", f"recent {metric} form")
+    lines = [
+        f"**Ranking basis: {basis}.**",
+        f"Based on the latest {gameweeks} finalized gameweek"
+        f"{'' if gameweeks == 1 else 's'}.",
+        "",
+    ]
+    for rank, row in enumerate(rows, start=1):
+        team = row.get("team_name", "Unknown team")
+        fixtures = _format_value(row.get("fixtures"), 0)
+        if metric == "defensive":
+            detail = (
+                f"{_format_value(row.get('clean_sheets'), 0)} clean sheets "
+                f"from {fixtures} fixtures "
+                f"({_format_value(row.get('clean_sheet_rate'), 2)} clean-sheet rate)"
+            )
+        else:
+            detail = (
+                f"{_format_value(row.get('expected_goals'), 2)} xG; "
+                f"{_format_value(row.get('goals_scored'), 0)} goals from "
+                f"{fixtures} fixtures "
+                f"({_format_value(row.get('expected_goals_per_fixture'), 2)} xG "
+                f"per fixture)"
+            )
+        lines.append(f"{rank}. **{team}** — {detail}.")
+    return "\n".join(lines)
+
+
 def _fallback_evidence_answer(plan, result):
     """Return a useful, fully grounded answer when text generation is empty."""
     if plan.get("tool_name") == "get_current_season_leaderboard" or (
         plan.get("intent") == "leaderboard"
     ):
         return _fallback_leaderboard_answer(plan, result)
+    if plan.get("tool_name") == "get_team_fixture_horizon" or (
+        plan.get("intent") == "team_fixture_horizon"
+    ):
+        return _fallback_fixture_horizon_answer(result)
+    if plan.get("tool_name") == "get_team_strength_leaderboard" or (
+        plan.get("intent") == "team_strength"
+    ):
+        return _fallback_team_strength_answer(result)
 
     rows = result.get("rows")
     if isinstance(rows, list) and rows:
