@@ -16,6 +16,8 @@ _ALLOWED_INTENTS = {
     "player_profile",
     "upcoming_fixtures",
     "compare_players",
+    "team_fixture_horizon",
+    "team_strength",
     "unsupported",
 }
 _ALLOWED_POSITIONS = {"GKP", "DEF", "MID", "FWD", "NONE"}
@@ -41,6 +43,9 @@ _ALLOWED_SCOPES = {
     "fpl_points",
     "player_research",
     "fixture_research",
+    "fixture_horizon",
+    "team_attacking_form",
+    "team_defensive_form",
     "data_coverage",
     "unknown",
 }
@@ -58,6 +63,8 @@ Use these intents only:
   one named player.
 - upcoming_fixtures: future fixtures for one named player.
 - compare_players: comparison of exactly two named players.
+- team_fixture_horizon: rank all teams by the difficulty of their next N fixtures.
+- team_strength: rank teams by recent attacking or defensive form.
 - unsupported: transfer, captaincy, squad, chip, or injury/line-up advice that
   cannot be grounded with the currently available data.
 
@@ -69,8 +76,12 @@ Position-aware ranking defaults:
 Explicit wording such as goals, assists, clean sheets, defensive contribution,
 FPL points, threat, creativity, xGI, or attacking always overrides a default.
 
-Use current_season for rankings. Use recent_form for questions about a player's
-last N gameweeks, defaulting to 5. Include only names that are explicitly
+Use current_season for player rankings. Use team_fixture_horizon for questions
+such as "which team has the easiest next five fixtures"; set gameweeks to that
+fixture horizon. Use team_strength for "best attacks" or "best defences"; use
+attacking or defensive as the metric and gameweeks as the recent form window.
+Use recent_form for questions about a player's last N gameweeks, defaulting to
+5. Include only names that are explicitly
 present in the question or clearly resolved from the supplied conversation
 context. Return unsupported rather than guessing a player or claiming the app
 can see the user's FPL team.
@@ -144,6 +155,8 @@ def normalise_query_plan(raw):
 
     if intent == "leaderboard" and metric == "NONE":
         metric = _default_metric(position)
+    if intent == "team_strength" and metric not in {"attacking", "defensive"}:
+        metric = "attacking"
     if intent == "leaderboard" and scope == "unknown":
         scope = {
             "DEF": "defensive_form",
