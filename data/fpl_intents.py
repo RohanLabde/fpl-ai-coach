@@ -25,6 +25,9 @@ _DATA_STATUS_WORDS = (
     "data freshness",
     "latest data",
 )
+_TEAM_FIXTURE_WORDS = ("fixture", "fixtures", "schedule", "run")
+_EASY_FIXTURE_WORDS = ("easiest", "easy", "best run", "lowest difficulty")
+_TEAM_STRENGTH_WORDS = ("best", "strongest", "top", "leader", "leaders", "rank")
 
 # These are answer-design defaults, not claims that other metrics are irrelevant.
 # A request for a different explicit metric always overrides the profile.
@@ -76,6 +79,17 @@ def _requested_limit(question):
     return max(1, min(int(match.group(1)), 15))
 
 
+def _requested_gameweeks(question, default=5):
+    """Extract a next-N fixture or recent-N-gameweek horizon."""
+    match = re.search(
+        r"\b(?:next|last|recent)\s+(\d{1,2})\s+(?:fixtures?|gameweeks?)\b",
+        question,
+    )
+    if not match:
+        return default
+    return max(1, min(int(match.group(1)), 10))
+
+
 def route_fpl_question(question):
     """Return a high-confidence data plan, or None for general tool routing."""
     normalized = " ".join(question.lower().split())
@@ -87,6 +101,47 @@ def route_fpl_question(question):
             "arguments": {},
             "reason": "The question asks about available FPL data or freshness.",
         }
+
+    asks_about_team = "team" in normalized or "teams" in normalized
+    asks_about_fixtures = any(word in normalized for word in _TEAM_FIXTURE_WORDS)
+    if asks_about_team and asks_about_fixtures and any(
+        word in normalized for word in _EASY_FIXTURE_WORDS
+    ):
+        horizon = _requested_gameweeks(normalized)
+        return {
+            "intent": "team_fixture_horizon",
+            "tool_name": "get_team_fixture_horizon",
+            "arguments": {"horizon": horizon, "limit": _requested_limit(normalized)},
+            "reason": (
+                "The question asks for the easiest upcoming team fixture run, "
+                "ranked by average official FPL difficulty."
+            ),
+        }
+
+    if asks_about_team and any(
+        word in normalized for word in _TEAM_STRENGTH_WORDS
+    ):
+        if any(word in normalized for word in ("defence", "defense", "defensive")):
+            metric = "defensive"
+        elif any(word in normalized for word in ("attack", "attacking", "goals", "xg")):
+            metric = "attacking"
+        else:
+            metric = None
+        if metric:
+            gameweeks = _requested_gameweeks(normalized)
+            return {
+                "intent": "team_strength",
+                "tool_name": "get_team_strength_leaderboard",
+                "arguments": {
+                    "metric": metric,
+                    "gameweeks": gameweeks,
+                    "limit": _requested_limit(normalized),
+                },
+                "reason": (
+                    "The question asks for recent team form, using a transparent "
+                    "attacking or defensive ranking profile."
+                ),
+            }
 
     is_ranking = any(re.search(r"\b" + re.escape(word) + r"\b", normalized)
                      for word in _RANKING_WORDS)
