@@ -83,6 +83,128 @@ def _latest_user_question(messages):
     return ""
 
 
+def _response_text(response):
+    """Extract text from a Responses API result across supported output shapes."""
+    answer = (getattr(response, "output_text", "") or "").strip()
+    if answer:
+        return answer
+
+    for item in getattr(response, "output", []) or []:
+        for content in getattr(item, "content", []) or []:
+            if getattr(content, "type", None) != "output_text":
+                continue
+            answer = (getattr(content, "text", "") or "").strip()
+            if answer:
+                return answer
+    return ""
+
+
+def _format_value(value, decimal_places=1):
+    """Format database values safely for a deterministic user-facing fallback."""
+    if value is None:
+        return "—"
+    if isinstance(value, float):
+        return f"{value:.{decimal_places}f}"
+    return str(value)
+
+
+def _fallback_leaderboard_answer(plan, result):
+    """Render verified leaderboard evidence if the answer writer returns no text."""
+    rows = result.get("rows", [])
+    if not rows:
+        return (
+            "I found no eligible players for that ranking in the available FPL data."
+        )
+
+    metric = result.get("metric") or plan.get("metric") or "points"
+    ranking_basis = result.get("ranking_basis") or metric.replace("_", " ")
+    completed_gameweeks = rows[0].get("season_completed_gameweeks")
+    minimum_starts = result.get("minimum_starts")
+
+    coverage = []
+    if completed_gameweeks is not None:
+        coverage.append(
+            f"Data covers {completed_gameweeks} completed gameweek"
+            f"{"" if completed_gameweeks == 1 else "s"}."
+        )
+    if minimum_starts is not None:
+        coverage.append(
+            f"Players need at least {minimum_starts} start"
+            f"{"" if minimum_starts == 1 else "s"} to qualify."
+        )
+
+    lines = [f"**Ranking basis: {ranking_basis}.**"]
+    if coverage:
+        lines.append(" ".join(coverage))
+    lines.append("")
+
+    for rank, row in enumerate(rows, start=1):
+        name = row.get("player_name", "Unknown player")
+        team = row.get("team_name", "Unknown team")
+        starts = _format_value(row.get("starts"), 0)
+
+        if metric == "defensive":
+            detail = (
+                f"{_format_value(row.get('total_clean_sheets'), 0)} clean sheets; "
+                f"{_format_value(row.get('defensive_contribution_per_90'))} defensive "
+                f"contribution per 90; {starts} starts"
+            )
+        elif metric == "goalkeeping":
+            detail = (
+                f"{_format_value(row.get('total_clean_sheets'), 0)} clean sheets; "
+                f"{_format_value(row.get('saves_per_90'))} saves per 90; "
+                f"{starts} starts"
+            )
+        elif metric in {"attacking", "xgi"}:
+            detail = (
+                f"{_format_value(row.get('total_xgi'))} xGI; "
+                f"{_format_value(row.get('xgi_per_90'))} xGI per 90; "
+                f"{starts} starts"
+            )
+        else:
+            detail = (
+                f"{_format_value(row.get('total_points'), 0)} FPL points; "
+                f"{starts} starts"
+            )
+        lines.append(f"{rank}. **{name}** ({team}) — {detail}")
+
+    return "\n".join(lines)
+
+
+def _fallback_evidence_answer(plan, result):
+    """Return a useful, fully grounded answer when text generation is empty."""
+    if plan.get("tool_name") == "get_current_season_leaderboard" or (
+        plan.get("intent") == "leaderboard"
+    ):
+        return _fallback_leaderboard_answer(plan, result)
+
+    rows = result.get("rows")
+    if isinstance(rows, list) and rows:
+        preview = rows[:5]
+        columns = [
+            key for key in (
+                "player_name", "team_name", "position", "total_points", "minutes",
+                "starts", "price", "gameweek", "points", "opponent_name",
+                "difficulty",
+            ) if any(key in row for row in preview)
+        ]
+        if columns:
+            header = " | ".join(column.replace("_", " ").title() for column in columns)
+            divider = " | ".join("---" for _ in columns)
+            body = [
+                " | ".join(_format_value(row.get(column)) for column in columns)
+                for row in preview
+            ]
+            return "\n".join(
+                ["Here are the verified FPL results:", "", header, divider, *body]
+            )
+
+    return (
+        "I found the relevant FPL data, but could not format a written answer. "
+        "Please try the question again."
+    )
+
+
 def _compose_evidence_answer(client, model, question, plan, result, sources):
     """Write a grounded answer only after the validated read-only lookup."""
     evidence = {
@@ -108,7 +230,10 @@ def _compose_evidence_answer(client, model, question, plan, result, sources):
         max_output_tokens=700,
         store=False,
     )
-    return response.output_text, sources
+    answer = _response_text(response)
+    if not answer:
+        answer = _fallback_evidence_answer(plan, result)
+    return answer, sources
 
 
 def _answer_routed_question(client, model, question, plan):
