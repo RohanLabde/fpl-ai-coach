@@ -14,6 +14,8 @@ from data.db import (
     get_live_player_profile,
     get_player_recent_form,
     get_player_upcoming_fixtures,
+    get_team_fixture_horizon,
+    get_team_strength_leaderboard,
     search_fpl_players,
 )
 from data.fpl_intents import route_fpl_question
@@ -36,6 +38,8 @@ TOOL_HANDLERS = {
     "get_player_upcoming_fixtures": get_player_upcoming_fixtures,
     "get_form_leaderboard": get_form_leaderboard,
     "get_fpl_data_status": get_fpl_data_status,
+    "get_team_fixture_horizon": get_team_fixture_horizon,
+    "get_team_strength_leaderboard": get_team_strength_leaderboard,
 }
 
 
@@ -347,6 +351,22 @@ def _answer_planned_question(client, model, question, messages):
             },
         )
         sources = ["get_current_season_leaderboard"]
+    elif plan["intent"] == "team_fixture_horizon":
+        result = _run_tool(
+            "get_team_fixture_horizon",
+            {"horizon": plan["gameweeks"], "limit": plan["limit"]},
+        )
+        sources = ["get_team_fixture_horizon"]
+    elif plan["intent"] == "team_strength":
+        result = _run_tool(
+            "get_team_strength_leaderboard",
+            {
+                "metric": plan["metric"] or "attacking",
+                "gameweeks": plan["gameweeks"],
+                "limit": plan["limit"],
+            },
+        )
+        sources = ["get_team_strength_leaderboard"]
     elif plan["intent"] in {
         "player_form",
         "player_profile",
