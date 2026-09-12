@@ -123,14 +123,14 @@ def _fallback_leaderboard_answer(plan, result):
 
     coverage = []
     if completed_gameweeks is not None:
+        gameweek_suffix = "" if completed_gameweeks == 1 else "s"
         coverage.append(
-            f"Data covers {completed_gameweeks} completed gameweek"
-            f"{"" if completed_gameweeks == 1 else "s"}."
+            f"Data covers {completed_gameweeks} completed gameweek{gameweek_suffix}."
         )
     if minimum_starts is not None:
+        start_suffix = "" if minimum_starts == 1 else "s"
         coverage.append(
-            f"Players need at least {minimum_starts} start"
-            f"{"" if minimum_starts == 1 else "s"} to qualify."
+            f"Players need at least {minimum_starts} start{start_suffix} to qualify."
         )
 
     lines = [f"**Ranking basis: {ranking_basis}.**"]
