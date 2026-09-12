@@ -1795,12 +1795,11 @@ def get_team_strength_leaderboard(metric="attacking", gameweeks=5, limit=10):
         },
         "defensive": {
             "order_by": (
-                "clean_sheet_rate DESC, clean_sheets DESC, "
-                "expected_goals_conceded_per_fixture ASC, team_name ASC"
+                "clean_sheet_rate DESC, clean_sheets DESC, team_name ASC"
             ),
             "basis": (
-                "recent defensive form: clean-sheet rate first, then clean "
-                "sheets and expected goals conceded"
+                "recent defensive form: clean-sheet rate first, then total "
+                "clean sheets"
             ),
         },
     }
@@ -1834,9 +1833,7 @@ def get_team_strength_leaderboard(metric="attacking", gameweeks=5, limit=10):
                 MAX(COALESCE(stats.fixture_count, 1)) AS fixtures,
                 SUM(COALESCE(stats.goals_scored, 0)) AS goals_scored,
                 SUM(COALESCE(stats.expected_goals, 0)) AS expected_goals,
-                MAX(COALESCE(stats.clean_sheets, 0)) AS clean_sheets,
-                MAX(COALESCE(stats.expected_goals_conceded, 0))
-                    AS expected_goals_conceded
+                MAX(COALESCE(stats.clean_sheets, 0)) AS clean_sheets
             FROM public.fpl_completed_gameweek_stats AS stats
             INNER JOIN latest_season
                 ON stats.season = latest_season.season
@@ -1851,8 +1848,7 @@ def get_team_strength_leaderboard(metric="attacking", gameweeks=5, limit=10):
                 SUM(fixtures) AS fixtures,
                 SUM(goals_scored) AS goals_scored,
                 SUM(expected_goals) AS expected_goals,
-                SUM(clean_sheets) AS clean_sheets,
-                SUM(expected_goals_conceded) AS expected_goals_conceded
+                SUM(clean_sheets) AS clean_sheets
             FROM team_gameweeks
             GROUP BY team_id
         )
@@ -1865,9 +1861,6 @@ def get_team_strength_leaderboard(metric="attacking", gameweeks=5, limit=10):
             ROUND(
                 clean_sheets * 1.0 / NULLIF(fixtures, 0), 2
             ) AS clean_sheet_rate,
-            ROUND(
-                expected_goals_conceded * 1.0 / NULLIF(fixtures, 0), 2
-            ) AS expected_goals_conceded_per_fixture,
             ROUND(
                 goals_scored * 1.0 / NULLIF(fixtures, 0), 2
             ) AS goals_per_fixture,
