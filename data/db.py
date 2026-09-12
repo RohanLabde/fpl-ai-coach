@@ -1709,3 +1709,184 @@ def get_player_upcoming_fixtures(player_id, limit=5):
         "source": "fpl_fixtures + fpl_live_player_snapshots (stored live data)",
         "rows": _records(rows),
     }
+
+
+def get_team_fixture_horizon(horizon=5, limit=10):
+    """Rank teams by the average FPL difficulty of their next fixtures."""
+    horizon = max(1, min(int(horizon), 8))
+    limit = max(1, min(int(limit), 15))
+    rows = _read_dataframe(
+        """
+        WITH team_fixtures AS (
+            SELECT
+                home_team_id AS team_id,
+                home_team_name AS team_name,
+                gameweek,
+                kickoff_time,
+                away_team_name AS opponent_team_name,
+                home_difficulty AS fixture_difficulty,
+                'home' AS venue
+            FROM public.fpl_fixtures
+            WHERE COALESCE(finished, false) = false
+              AND kickoff_time >= now()
+
+            UNION ALL
+
+            SELECT
+                away_team_id AS team_id,
+                away_team_name AS team_name,
+                gameweek,
+                kickoff_time,
+                home_team_name AS opponent_team_name,
+                away_difficulty AS fixture_difficulty,
+                'away' AS venue
+            FROM public.fpl_fixtures
+            WHERE COALESCE(finished, false) = false
+              AND kickoff_time >= now()
+        ),
+        ranked_fixtures AS (
+            SELECT
+                *,
+                ROW_NUMBER() OVER (
+                    PARTITION BY team_id
+                    ORDER BY kickoff_time, gameweek
+                ) AS fixture_number
+            FROM team_fixtures
+        )
+        SELECT
+            team_name,
+            COUNT(*) AS fixture_count,
+            ROUND(AVG(fixture_difficulty)::numeric, 2) AS average_fdr,
+            SUM(CASE WHEN venue = 'home' THEN 1 ELSE 0 END) AS home_fixtures,
+            SUM(CASE WHEN venue = 'away' THEN 1 ELSE 0 END) AS away_fixtures,
+            STRING_AGG(
+                opponent_team_name || CASE
+                    WHEN venue = 'home' THEN ' (H)'
+                    ELSE ' (A)'
+                END,
+                ', ' ORDER BY kickoff_time
+            ) AS upcoming_fixtures
+        FROM ranked_fixtures
+        WHERE fixture_number <= :horizon
+        GROUP BY team_id, team_name
+        ORDER BY average_fdr ASC, team_name ASC
+        LIMIT :limit
+        """,
+        {"horizon": horizon, "limit": limit},
+    )
+    return {
+        "source": "fpl_fixtures (stored live fixture schedule)",
+        "horizon": horizon,
+        "ranking_basis": (
+            "lowest average official FPL fixture difficulty over the next "
+            f"{horizon} fixtures"
+        ),
+        "rows": _records(rows),
+    }
+
+
+def get_team_strength_leaderboard(metric="attacking", gameweeks=5, limit=10):
+    """Rank current-season teams using finalized player-gameweek totals only."""
+    metric = str(metric).lower()
+    profiles = {
+        "attacking": {
+            "order_by": "expected_goals DESC, goals_scored DESC, team_name ASC",
+            "basis": "recent attacking form: expected goals first, then goals scored",
+        },
+        "defensive": {
+            "order_by": (
+                "clean_sheet_rate DESC, clean_sheets DESC, "
+                "expected_goals_conceded_per_fixture ASC, team_name ASC"
+            ),
+            "basis": (
+                "recent defensive form: clean-sheet rate first, then clean "
+                "sheets and expected goals conceded"
+            ),
+        },
+    }
+    if metric not in profiles:
+        raise ValueError("metric must be 'attacking' or 'defensive'")
+
+    gameweeks = max(1, min(int(gameweeks), 10))
+    limit = max(1, min(int(limit), 15))
+    profile = profiles[metric]
+    rows = _read_dataframe(
+        f"""
+        WITH latest_season AS (
+            SELECT season
+            FROM public.fpl_completed_gameweek_stats
+            ORDER BY season DESC
+            LIMIT 1
+        ),
+        recent_gameweeks AS (
+            SELECT DISTINCT stats.gameweek
+            FROM public.fpl_completed_gameweek_stats AS stats
+            INNER JOIN latest_season
+                ON stats.season = latest_season.season
+            ORDER BY stats.gameweek DESC
+            LIMIT :gameweeks
+        ),
+        team_gameweeks AS (
+            SELECT
+                stats.team_id,
+                MAX(stats.team_name) AS team_name,
+                stats.gameweek,
+                MAX(COALESCE(stats.fixture_count, 1)) AS fixtures,
+                SUM(COALESCE(stats.goals_scored, 0)) AS goals_scored,
+                SUM(COALESCE(stats.expected_goals, 0)) AS expected_goals,
+                MAX(COALESCE(stats.clean_sheets, 0)) AS clean_sheets,
+                MAX(COALESCE(stats.expected_goals_conceded, 0))
+                    AS expected_goals_conceded
+            FROM public.fpl_completed_gameweek_stats AS stats
+            INNER JOIN latest_season
+                ON stats.season = latest_season.season
+            INNER JOIN recent_gameweeks
+                ON stats.gameweek = recent_gameweeks.gameweek
+            GROUP BY stats.team_id, stats.gameweek
+        ),
+        team_totals AS (
+            SELECT
+                team_id,
+                MAX(team_name) AS team_name,
+                SUM(fixtures) AS fixtures,
+                SUM(goals_scored) AS goals_scored,
+                SUM(expected_goals) AS expected_goals,
+                SUM(clean_sheets) AS clean_sheets,
+                SUM(expected_goals_conceded) AS expected_goals_conceded
+            FROM team_gameweeks
+            GROUP BY team_id
+        )
+        SELECT
+            team_name,
+            fixtures,
+            goals_scored,
+            ROUND(expected_goals::numeric, 2) AS expected_goals,
+            clean_sheets,
+            ROUND(
+                clean_sheets * 1.0 / NULLIF(fixtures, 0), 2
+            ) AS clean_sheet_rate,
+            ROUND(
+                expected_goals_conceded * 1.0 / NULLIF(fixtures, 0), 2
+            ) AS expected_goals_conceded_per_fixture,
+            ROUND(
+                goals_scored * 1.0 / NULLIF(fixtures, 0), 2
+            ) AS goals_per_fixture,
+            ROUND(
+                expected_goals * 1.0 / NULLIF(fixtures, 0), 2
+            ) AS expected_goals_per_fixture
+        FROM team_totals
+        ORDER BY {profile["order_by"]}
+        LIMIT :limit
+        """,
+        {"gameweeks": gameweeks, "limit": limit},
+    )
+    return {
+        "source": (
+            "fpl_completed_gameweek_stats (finalized current-season "
+            "player-gameweek totals)"
+        ),
+        "metric": metric,
+        "gameweeks": gameweeks,
+        "ranking_basis": profile["basis"],
+        "rows": _records(rows),
+    }
