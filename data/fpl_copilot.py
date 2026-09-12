@@ -1,6 +1,7 @@
 """Grounded, read-only FPL chat assistant for the Streamlit application."""
 
 import json
+from decimal import Decimal
 
 import streamlit as st
 
@@ -71,7 +72,8 @@ list when the evidence is a leaderboard, and mention the completed-gameweek
 coverage. For defensive and goalkeeping profiles, foreground the profile's
 defensive statistics and do not frame goals or assists as ranking drivers.
 Do not invent statistics, recommendations, injuries, fixtures, or data that
-are not in the evidence.
+are not in the evidence. Format non-integer statistics to at most two decimal
+places. Never expose long raw database decimal values.
 """.strip()
 
 
@@ -99,12 +101,26 @@ def _response_text(response):
     return ""
 
 
+def _normalise_evidence(value):
+    """Round database numerics before supplying evidence to the answer writer."""
+    if isinstance(value, Decimal):
+        return round(float(value), 2)
+    if isinstance(value, float):
+        return round(value, 2)
+    if isinstance(value, dict):
+        return {key: _normalise_evidence(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_normalise_evidence(item) for item in value]
+    return value
+
+
 def _format_value(value, decimal_places=1):
     """Format database values safely for a deterministic user-facing fallback."""
     if value is None:
         return "—"
-    if isinstance(value, float):
-        return f"{value:.{decimal_places}f}"
+    if isinstance(value, (int, float, Decimal)) and not isinstance(value, bool):
+        rounded = f"{float(value):.{decimal_places}f}"
+        return rounded.rstrip("0").rstrip(".") if decimal_places else rounded
     return str(value)
 
 
@@ -211,7 +227,7 @@ def _compose_evidence_answer(client, model, question, plan, result, sources):
         "question": question,
         "intent": plan.get("intent"),
         "interpretation": plan.get("reason") or plan.get("scope"),
-        "data": result,
+        "data": _normalise_evidence(result),
     }
     response = client.responses.create(
         model=model,
