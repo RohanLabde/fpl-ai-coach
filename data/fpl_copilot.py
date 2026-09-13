@@ -264,6 +264,93 @@ def _fallback_team_strength_answer(result):
     return "\n".join(lines)
 
 
+
+def _availability_summary(row):
+    """Turn live FPL availability fields into a concise, grounded status."""
+    status = str(row.get("status") or "").lower()
+    chance = row.get("chance_of_playing_next_round")
+    if status == "a":
+        return "Available"
+    if chance is not None:
+        return f"{_format_value(chance, 0)}% chance of playing next round"
+    if status:
+        return f"FPL status: {status}"
+    return "Availability not provided"
+
+
+def _fallback_player_profile_answer(result):
+    """Render the newest stored live player snapshot without writer variation."""
+    rows = result.get("rows", [])
+    if not rows:
+        return "I could not find a current stored FPL profile for that player."
+
+    row = rows[0]
+    name = row.get("player_name") or row.get("web_name") or "Unknown player"
+    team = row.get("team_name") or "Unknown team"
+    position = row.get("position") or "Unknown position"
+    lines = [
+        f"**{name}** — {position}, {team}",
+        "",
+        f"- **FPL price:** {_format_value(row.get('price'))}",
+        f"- **Season points:** {_format_value(row.get('total_points'), 0)}",
+        f"- **Current FPL form:** {_format_value(row.get('form'))}",
+        f"- **Ownership:** {_format_value(row.get('selected_by_percent'))}%",
+        f"- **Availability:** {_availability_summary(row)}",
+    ]
+    news = str(row.get("news") or "").strip()
+    if news:
+        lines.append(f"- **FPL news:** {news}")
+    return "\n".join(lines)
+
+
+def _fallback_player_comparison_answer(result):
+    """Render a transparent, position-aware comparison from verified rows."""
+    rows = result.get("rows", [])
+    if len(rows) < 2:
+        return "I could not find current comparable FPL data for both players."
+
+    lines = [
+        "**Player comparison**",
+        "Uses the latest stored live details and finalized current-season totals.",
+        "",
+    ]
+    for row in rows:
+        name = row.get("player_name", "Unknown player")
+        team = row.get("team_name", "Unknown team")
+        position = row.get("position", "Unknown position")
+        lines.extend(
+            [
+                f"**{name}** — {position}, {team}",
+                f"- Price: {_format_value(row.get('price'))}; "
+                f"availability: {_availability_summary(row)}",
+                f"- Finalized season: {_format_value(row.get('season_points'), 0)} "
+                f"points, {_format_value(row.get('season_minutes'), 0)} minutes",
+            ]
+        )
+        if position == "DEF":
+            lines.append(
+                f"- Defensive output: "
+                f"{_format_value(row.get('season_clean_sheets'), 0)} clean sheets; "
+                f"{_format_value(row.get('season_defensive_contribution_per_90'))} "
+                "defensive contribution per 90"
+            )
+        elif position == "GKP":
+            lines.append(
+                f"- Goalkeeping output: "
+                f"{_format_value(row.get('season_clean_sheets'), 0)} clean sheets; "
+                f"{_format_value(row.get('season_saves_per_90'))} saves per 90"
+            )
+        else:
+            lines.append(
+                f"- Attacking output: {_format_value(row.get('season_goals'), 0)} goals; "
+                f"{_format_value(row.get('season_assists'), 0)} assists; "
+                f"{_format_value(row.get('season_xgi'))} xGI "
+                f"({_format_value(row.get('season_xgi_per_90'))} per 90)"
+            )
+        lines.append("")
+
+    return "\n".join(lines).rstrip()
+
 def _fallback_evidence_answer(plan, result):
     """Return a useful, fully grounded answer when text generation is empty."""
     if plan.get("tool_name") == "get_current_season_leaderboard" or (
@@ -278,6 +365,14 @@ def _fallback_evidence_answer(plan, result):
         plan.get("intent") == "team_strength"
     ):
         return _fallback_team_strength_answer(result)
+    if plan.get("tool_name") == "get_live_player_profile" or (
+        plan.get("intent") == "player_profile"
+    ):
+        return _fallback_player_profile_answer(result)
+    if plan.get("tool_name") == "compare_fpl_players" or (
+        plan.get("intent") == "compare_players"
+    ):
+        return _fallback_player_comparison_answer(result)
 
     rows = result.get("rows")
     if isinstance(rows, list) and rows:
@@ -318,6 +413,14 @@ def _compose_evidence_answer(client, model, question, plan, result, sources):
         plan.get("intent") == "team_strength"
     ):
         return _fallback_team_strength_answer(result), sources
+    if plan.get("tool_name") == "get_live_player_profile" or (
+        plan.get("intent") == "player_profile"
+    ):
+        return _fallback_player_profile_answer(result), sources
+    if plan.get("tool_name") == "compare_fpl_players" or (
+        plan.get("intent") == "compare_players"
+    ):
+        return _fallback_player_comparison_answer(result), sources
 
     evidence = {
         "question": question,
