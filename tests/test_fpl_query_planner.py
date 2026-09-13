@@ -53,6 +53,23 @@ class FplQueryPlanTests(unittest.TestCase):
         self.assertEqual(plan["intent"], "team_strength")
         self.assertEqual(plan["arguments"]["metric"], "defensive")
 
+    def test_spaced_gameweek_window_is_preserved_for_team_form(self):
+        plan = route_fpl_question(
+            "Which teams have the best defensive form over the last 3 game weeks?"
+        )
+        self.assertEqual(plan["intent"], "team_strength")
+        self.assertEqual(plan["arguments"]["metric"], "defensive")
+        self.assertEqual(plan["arguments"]["gameweeks"], 3)
+
+    def test_team_attack_ranking_preserves_limit_and_window(self):
+        plan = route_fpl_question(
+            "Give me the top 5 teams for attacking form over the last 3 gameweeks"
+        )
+        self.assertEqual(plan["intent"], "team_strength")
+        self.assertEqual(plan["arguments"]["metric"], "attacking")
+        self.assertEqual(plan["arguments"]["limit"], 5)
+        self.assertEqual(plan["arguments"]["gameweeks"], 3)
+
     def test_compare_requires_two_explicit_names(self):
         plan = normalise_query_plan(
             {
