@@ -1,13 +1,22 @@
 """Unit checks for deterministic player profile and comparison rendering."""
 
+import importlib.util
 import unittest
 
-from data.fpl_copilot import (
-    _fallback_player_comparison_answer,
-    _fallback_player_profile_answer,
+_FORMATTERS_AVAILABLE = (
+    importlib.util.find_spec("streamlit") is not None
+    and importlib.util.find_spec("pandas") is not None
 )
+if _FORMATTERS_AVAILABLE:
+    from data.fpl_copilot import (
+        _fallback_player_comparison_answer,
+        _fallback_player_profile_answer,
+    )
 
 
+@unittest.skipUnless(
+    _FORMATTERS_AVAILABLE, "requires the application's optional runtime packages"
+)
 class PlayerAnswerFormatTests(unittest.TestCase):
     def test_profile_renders_live_fields_and_availability(self):
         answer = _fallback_player_profile_answer(
