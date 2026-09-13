@@ -196,7 +196,8 @@ def _fallback_leaderboard_answer(plan, result):
                 f"{_format_value(row.get('total_points'), 0)} FPL points; "
                 f"{starts} starts"
             )
-        lines.append(f"{rank}. **{name}** ({team}) — {detail}")
+        bonus_detail = f"{_format_value(row.get('total_bonus'), 0)} bonus points"
+        lines.append(f"{rank}. **{name}** ({team}) — {detail}; {bonus_detail}")
 
     return "\n".join(lines)
 
@@ -295,6 +296,9 @@ def _fallback_player_profile_answer(result):
         f"- **Season points:** {_format_value(row.get('total_points'), 0)}",
         f"- **Current FPL form:** {_format_value(row.get('form'))}",
         f"- **Ownership:** {_format_value(row.get('selected_by_percent'))}%",
+        f"- **Bonus:** {_format_value(row.get('season_bonus'), 0)} points "
+        f"({_format_value(row.get('season_bonus_per_90'))} per 90); "
+        f"{_format_value(row.get('season_bps'), 0)} BPS",
         f"- **Availability:** {_availability_summary(row)}",
     ]
     news = str(row.get("news") or "").strip()
@@ -324,7 +328,10 @@ def _fallback_player_comparison_answer(result):
                 f"- Price: {_format_value(row.get('price'))}; "
                 f"availability: {_availability_summary(row)}",
                 f"- Finalized season: {_format_value(row.get('season_points'), 0)} "
-                f"points, {_format_value(row.get('season_minutes'), 0)} minutes",
+                f"points, {_format_value(row.get('season_minutes'), 0)} minutes; "
+                f"{_format_value(row.get('season_bonus'), 0)} bonus points "
+                f"({_format_value(row.get('season_bonus_per_90'))} per 90); "
+                f"{_format_value(row.get('season_bps'), 0)} BPS",
             ]
         )
         if position == "DEF":
