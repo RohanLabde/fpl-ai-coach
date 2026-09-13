@@ -118,6 +118,16 @@ def _normalise_evidence(value):
     return value
 
 
+def _format_percentage(value, decimal_places=1):
+    """Format a database ratio as a compact user-facing percentage."""
+    if value is None:
+        return "—"
+    try:
+        return f"{float(value) * 100:.{decimal_places}f}%"
+    except (TypeError, ValueError):
+        return str(value)
+
+
 def _format_value(value, decimal_places=1):
     """Format database values safely for a deterministic user-facing fallback."""
     if value is None:
@@ -235,10 +245,12 @@ def _fallback_team_strength_answer(result):
         team = row.get("team_name", "Unknown team")
         fixtures = _format_value(row.get("fixtures"), 0)
         if metric == "defensive":
+            clean_sheets = row.get("clean_sheets") or 0
+            clean_sheet_label = "clean sheet" if clean_sheets == 1 else "clean sheets"
             detail = (
-                f"{_format_value(row.get('clean_sheets'), 0)} clean sheets "
+                f"{_format_value(clean_sheets, 0)} {clean_sheet_label} "
                 f"from {fixtures} fixtures "
-                f"({_format_value(row.get('clean_sheet_rate'), 2)} clean-sheet rate)"
+                f"({_format_percentage(row.get('clean_sheet_rate'))} clean-sheet rate)"
             )
         else:
             detail = (
@@ -296,6 +308,17 @@ def _fallback_evidence_answer(plan, result):
 
 def _compose_evidence_answer(client, model, question, plan, result, sources):
     """Write a grounded answer only after the validated read-only lookup."""
+    # Team rankings come from a complete, ordered SQL result. Render them directly
+    # so a language-model response cannot omit rows or drop their supporting detail.
+    if plan.get("tool_name") == "get_team_fixture_horizon" or (
+        plan.get("intent") == "team_fixture_horizon"
+    ):
+        return _fallback_fixture_horizon_answer(result), sources
+    if plan.get("tool_name") == "get_team_strength_leaderboard" or (
+        plan.get("intent") == "team_strength"
+    ):
+        return _fallback_team_strength_answer(result), sources
+
     evidence = {
         "question": question,
         "intent": plan.get("intent"),
