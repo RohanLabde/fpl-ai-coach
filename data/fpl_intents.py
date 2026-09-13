@@ -82,7 +82,7 @@ def _requested_limit(question):
 def _requested_gameweeks(question, default=5):
     """Extract a next-N fixture or recent-N-gameweek horizon."""
     match = re.search(
-        r"\b(?:next|last|recent)\s+(\d{1,2})\s+(?:fixtures?|gameweeks?)\b",
+        r"\b(?:next|last|recent)\s+(\d{1,2})\s+(?:fixtures?|game\s*weeks?)\b",
         question,
     )
     if not match:
