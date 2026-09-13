@@ -1201,6 +1201,8 @@ def compare_fpl_players(player_a_id, player_b_id):
                 SUM(COALESCE(goals_scored, 0)) AS season_goals,
                 SUM(COALESCE(assists, 0)) AS season_assists,
                 SUM(COALESCE(clean_sheets, 0)) AS season_clean_sheets,
+                SUM(COALESCE(bonus, 0)) AS season_bonus,
+                SUM(COALESCE(bps, 0)) AS season_bps,
                 SUM(COALESCE(defensive_contribution, 0)) AS season_defensive_contribution,
                 SUM(COALESCE(saves, 0)) AS season_saves,
                 SUM(COALESCE(expected_goal_involvements, 0)) AS season_xgi,
@@ -1227,11 +1229,21 @@ def compare_fpl_players(player_a_id, player_b_id):
             COALESCE(totals.season_goals, 0) AS season_goals,
             COALESCE(totals.season_assists, 0) AS season_assists,
             COALESCE(totals.season_clean_sheets, 0) AS season_clean_sheets,
+            COALESCE(totals.season_bonus, 0) AS season_bonus,
+            COALESCE(totals.season_bps, 0) AS season_bps,
             COALESCE(totals.season_defensive_contribution, 0)
                 AS season_defensive_contribution,
             COALESCE(totals.season_saves, 0) AS season_saves,
             COALESCE(totals.season_xgi, 0) AS season_xgi,
             COALESCE(totals.season_xgc, 0) AS season_xgc,
+            CASE
+                WHEN COALESCE(totals.season_minutes, 0) > 0
+                    THEN totals.season_bonus * 90.0 / totals.season_minutes
+            END AS season_bonus_per_90,
+            CASE
+                WHEN COALESCE(totals.season_minutes, 0) > 0
+                    THEN totals.season_bps * 90.0 / totals.season_minutes
+            END AS season_bps_per_90,
             CASE
                 WHEN COALESCE(totals.season_minutes, 0) > 0
                     THEN totals.season_xgi * 90.0 / totals.season_minutes
@@ -1313,6 +1325,8 @@ def get_current_season_leaderboard(
                 SUM(COALESCE(stats.goals_scored, 0)) AS total_goals,
                 SUM(COALESCE(stats.assists, 0)) AS total_assists,
                 SUM(COALESCE(stats.clean_sheets, 0)) AS total_clean_sheets,
+                SUM(COALESCE(stats.bonus, 0)) AS total_bonus,
+                SUM(COALESCE(stats.bps, 0)) AS total_bps,
                 SUM(COALESCE(stats.goals_conceded, 0)) AS total_goals_conceded,
                 SUM(COALESCE(stats.saves, 0)) AS total_saves,
                 SUM(COALESCE(stats.defensive_contribution, 0))
@@ -1347,6 +1361,12 @@ def get_current_season_leaderboard(
                 CASE WHEN minutes > 0
                     THEN total_xgc * 90.0 / minutes
                 END AS xgc_per_90,
+                CASE WHEN minutes > 0
+                    THEN total_bonus * 90.0 / minutes
+                END AS bonus_per_90,
+                CASE WHEN minutes > 0
+                    THEN total_bps * 90.0 / minutes
+                END AS bps_per_90,
                 CASE WHEN minutes > 0
                     THEN total_xgi * 90.0 / minutes
                 END AS xgi_per_90,
@@ -1649,14 +1669,38 @@ def get_live_player_profile(player_id):
     """Return the newest stored live snapshot for a player."""
     rows = _read_dataframe(
         """
+        WITH latest_season AS (
+            SELECT MAX(season) AS season
+            FROM public.fpl_completed_gameweek_stats
+        ),
+        season_totals AS (
+            SELECT
+                stats.player_id,
+                SUM(COALESCE(stats.bonus, 0)) AS season_bonus,
+                SUM(COALESCE(stats.bps, 0)) AS season_bps,
+                SUM(COALESCE(stats.minutes, 0)) AS season_minutes
+            FROM public.fpl_completed_gameweek_stats AS stats
+            INNER JOIN latest_season
+                ON stats.season = latest_season.season
+            WHERE stats.player_id = :player_id
+            GROUP BY stats.player_id
+        )
         SELECT
-            snapshot_at, player_id, first_name || ' ' || second_name AS player_name,
-            web_name, team_name, position, price, total_points, form,
-            selected_by_percent, status, chance_of_playing_next_round, news,
-            current_gameweek
-        FROM public.fpl_live_player_snapshots
-        WHERE player_id = :player_id
-        ORDER BY snapshot_at DESC
+            live.snapshot_at, live.player_id,
+            live.first_name || ' ' || live.second_name AS player_name,
+            live.web_name, live.team_name, live.position, live.price,
+            live.total_points, live.form, live.selected_by_percent, live.status,
+            live.chance_of_playing_next_round, live.news, live.current_gameweek,
+            COALESCE(totals.season_bonus, 0) AS season_bonus,
+            COALESCE(totals.season_bps, 0) AS season_bps,
+            CASE WHEN COALESCE(totals.season_minutes, 0) > 0
+                THEN totals.season_bonus * 90.0 / totals.season_minutes
+            END AS season_bonus_per_90
+        FROM public.fpl_live_player_snapshots AS live
+        LEFT JOIN season_totals AS totals
+            ON totals.player_id = live.player_id
+        WHERE live.player_id = :player_id
+        ORDER BY live.snapshot_at DESC
         LIMIT 1
         """,
         {"player_id": int(player_id)},
