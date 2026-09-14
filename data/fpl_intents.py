@@ -28,6 +28,7 @@ _DATA_STATUS_WORDS = (
 _TEAM_FIXTURE_WORDS = ("fixture", "fixtures", "schedule", "run")
 _EASY_FIXTURE_WORDS = ("easiest", "easy", "best run", "lowest difficulty")
 _TEAM_STRENGTH_WORDS = ("best", "strongest", "top", "leader", "leaders", "rank")
+_PICK_WORDS = ("pick", "picks", "option", "options", "recommend", "value")
 
 # These are answer-design defaults, not claims that other metrics are irrelevant.
 # A request for a different explicit metric always overrides the profile.
@@ -90,6 +91,33 @@ def _requested_gameweeks(question, default=5):
     return max(1, min(int(match.group(1)), 10))
 
 
+def _requested_next_fixture_horizon(question, default=5):
+    """Extract only an upcoming-fixture horizon, never a form window."""
+    match = re.search(r"\bnext\s+(\d{1,2})\s+fixtures?\b", question)
+    if not match:
+        return default
+    return max(1, min(int(match.group(1)), 10))
+
+
+def _requested_form_gameweeks(question, default=3):
+    """Extract a recent form window without mistaking a fixture horizon for it."""
+    match = re.search(r"\b(?:last|recent)\s+(\d{1,2})\s+game\s*weeks?\b", question)
+    if not match:
+        return default
+    return max(1, min(int(match.group(1)), 10))
+
+
+def _requested_max_price(question):
+    """Extract an FPL price cap expressed in millions, when supplied."""
+    match = re.search(
+        r"\b(?:under|below|up to|within)\s*(?:£|\$)?\s*(\d{1,2}(?:\.\d+)?)\s*m?\b",
+        question,
+    )
+    if not match:
+        return None
+    return max(3.0, min(float(match.group(1)), 20.0))
+
+
 def route_fpl_question(question):
     """Return a high-confidence data plan, or None for general tool routing."""
     normalized = " ".join(question.lower().split())
@@ -143,13 +171,42 @@ def route_fpl_question(question):
                 ),
             }
 
+    position = _position_from_question(normalized)
+    max_price = _requested_max_price(normalized)
+    asks_for_pick = any(
+        re.search(r"\b" + re.escape(word) + r"\b", normalized)
+        for word in _PICK_WORDS
+    ) or (
+        any(re.search(r"\b" + re.escape(word) + r"\b", normalized)
+            for word in _RANKING_WORDS)
+        and ("next" in normalized or "fixture" in normalized)
+    )
+    if position in {"MID", "DEF"} and asks_for_pick:
+        horizon = _requested_next_fixture_horizon(normalized)
+        form_gameweeks = _requested_form_gameweeks(normalized)
+        return {
+            "intent": "fpl_picks",
+            "tool_name": "get_fpl_pick_leaderboard",
+            "arguments": {
+                "position": position,
+                "max_price": max_price,
+                "horizon": horizon,
+                "form_gameweeks": form_gameweeks,
+                "limit": _requested_limit(normalized),
+            },
+            "reason": (
+                "The question asks for transparent, non-personal FPL pick "
+                "candidates using position-specific recent form, fixtures, "
+                "price, and starts eligibility."
+            ),
+        }
+
     is_ranking = any(re.search(r"\b" + re.escape(word) + r"\b", normalized)
                      for word in _RANKING_WORDS)
     is_current_season = any(
         phrase in normalized for phrase in _CURRENT_SEASON_WORDS
     )
     if is_ranking and is_current_season:
-        position = _position_from_question(normalized)
         metric = _ranking_metric(normalized, position)
         return {
             "intent": "current_season_leaderboard",
