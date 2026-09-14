@@ -9,6 +9,7 @@ from data.db import (
     compare_fpl_players,
     get_current_season_leaderboard,
     get_fpl_data_status,
+    get_fpl_pick_leaderboard,
     get_form_leaderboard,
     get_latest_feature_snapshot,
     get_live_player_profile,
@@ -40,6 +41,7 @@ TOOL_HANDLERS = {
     "get_fpl_data_status": get_fpl_data_status,
     "get_team_fixture_horizon": get_team_fixture_horizon,
     "get_team_strength_leaderboard": get_team_strength_leaderboard,
+    "get_fpl_pick_leaderboard": get_fpl_pick_leaderboard,
 }
 
 
@@ -358,6 +360,58 @@ def _fallback_player_comparison_answer(result):
 
     return "\n".join(lines).rstrip()
 
+
+def _fallback_fpl_pick_answer(result):
+    """Render transparent, non-personal MID/DEF candidate rankings."""
+    rows = result.get("rows", [])
+    if not rows:
+        return "I found no available players who meet the stated FPL pick criteria."
+
+    position = result.get("position", "FPL")
+    horizon = result.get("horizon", 5)
+    form_gameweeks = result.get("form_gameweeks", 3)
+    budget = result.get("max_price")
+    basis = result.get("ranking_basis", "position-specific recent form")
+    eligibility = (
+        f"Available {position} players with at least two starts across the last "
+        f"{form_gameweeks} finalized gameweeks"
+    )
+    if budget is not None:
+        eligibility += f" and a price of £{_format_value(budget)}m or less"
+    lines = [
+        f"**Transparent {position} pick candidates**",
+        f"**Ranking basis: {basis}**",
+        f"{eligibility}. This is a candidate list, not personalised transfer advice.",
+        "",
+    ]
+    for rank, row in enumerate(rows, start=1):
+        name = row.get("player_name", "Unknown player")
+        team = row.get("team_name", "Unknown team")
+        price = _format_value(row.get("price"))
+        starts = _format_value(row.get("form_starts"), 0)
+        points = _format_value(row.get("form_points"), 0)
+        bonus = _format_value(row.get("form_bonus"), 0)
+        fdr = _format_value(row.get("average_fdr"), 2)
+        fixtures = row.get("upcoming_fixtures") or "—"
+        if position == "DEF":
+            output = (
+                f"{_format_percentage(row.get('form_clean_sheet_rate'))} clean-sheet rate; "
+                f"{_format_value(row.get('form_defensive_contribution_per_90'))} "
+                "defensive contribution per 90"
+            )
+        else:
+            output = (
+                f"{_format_value(row.get('form_xgi'))} xGI; "
+                f"{_format_value(row.get('form_xgi_per_90'))} xGI per 90"
+            )
+        lines.append(
+            f"{rank}. **{name}** ({team}, £{price}m) — {output}; "
+            f"{points} recent FPL points ({bonus} bonus); {starts} starts; "
+            f"next {horizon} average FDR {fdr}. Fixtures: {fixtures}."
+        )
+    return "\n".join(lines)
+
+
 def _fallback_evidence_answer(plan, result):
     """Return a useful, fully grounded answer when text generation is empty."""
     if plan.get("tool_name") == "get_current_season_leaderboard" or (
@@ -380,6 +434,10 @@ def _fallback_evidence_answer(plan, result):
         plan.get("intent") == "compare_players"
     ):
         return _fallback_player_comparison_answer(result)
+    if plan.get("tool_name") == "get_fpl_pick_leaderboard" or (
+        plan.get("intent") == "fpl_picks"
+    ):
+        return _fallback_fpl_pick_answer(result)
 
     rows = result.get("rows")
     if isinstance(rows, list) and rows:
@@ -428,6 +486,10 @@ def _compose_evidence_answer(client, model, question, plan, result, sources):
         plan.get("intent") == "compare_players"
     ):
         return _fallback_player_comparison_answer(result), sources
+    if plan.get("tool_name") == "get_fpl_pick_leaderboard" or (
+        plan.get("intent") == "fpl_picks"
+    ):
+        return _fallback_fpl_pick_answer(result), sources
 
     evidence = {
         "question": question,
@@ -569,6 +631,18 @@ def _answer_planned_question(client, model, question, messages):
             },
         )
         sources = ["get_team_strength_leaderboard"]
+    elif plan["intent"] == "fpl_picks":
+        result = _run_tool(
+            "get_fpl_pick_leaderboard",
+            {
+                "position": plan["position"],
+                "max_price": plan["max_price"],
+                "horizon": plan["gameweeks"],
+                "form_gameweeks": 3,
+                "limit": plan["limit"],
+            },
+        )
+        sources = ["get_fpl_pick_leaderboard"]
     elif plan["intent"] in {
         "player_form",
         "player_profile",
