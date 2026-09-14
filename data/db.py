@@ -1402,6 +1402,221 @@ def get_current_season_leaderboard(
     }
 
 
+
+def get_fpl_pick_leaderboard(
+    position, max_price=None, horizon=5, form_gameweeks=3, limit=10
+):
+    """Rank non-personal FPL pick candidates from live and finalized data.
+
+    This is a transparent candidate ranking, not personalised transfer advice.
+    It requires availability, a minimum recent-starts threshold, and combines
+    position-specific finalized form with the team's upcoming FPL difficulty.
+    """
+    position = str(position).upper()
+    profiles = {
+        "MID": {
+            "order_by": (
+                "form_xgi DESC NULLS LAST, form_xgi_per_90 DESC NULLS LAST, "
+                "average_fdr ASC NULLS LAST, form_points_per_price DESC NULLS LAST, "
+                "price ASC, player_name"
+            ),
+            "basis": (
+                "Midfield picks: recent xGI first, then xGI per 90, easier "
+                "upcoming fixtures, and recent points per £m."
+            ),
+        },
+        "DEF": {
+            "order_by": (
+                "form_clean_sheet_rate DESC NULLS LAST, "
+                "form_defensive_contribution_per_90 DESC NULLS LAST, "
+                "average_fdr ASC NULLS LAST, form_points_per_price DESC NULLS LAST, "
+                "price ASC, player_name"
+            ),
+            "basis": (
+                "Defender picks: recent clean-sheet rate first, then defensive "
+                "contribution per 90, easier upcoming fixtures, and recent "
+                "points per £m."
+            ),
+        },
+    }
+    if position not in profiles:
+        raise ValueError("position must be MID or DEF for FPL pick rankings.")
+
+    horizon = max(1, min(int(horizon), 8))
+    form_gameweeks = max(1, min(int(form_gameweeks), 10))
+    limit = max(1, min(int(limit), 15))
+    if max_price is not None:
+        max_price = max(3.0, min(float(max_price), 20.0))
+
+    profile = profiles[position]
+    rows = _read_dataframe(
+        f"""
+        WITH latest_live AS (
+            SELECT *
+            FROM public.fpl_live_player_snapshots
+            WHERE snapshot_at = (
+                SELECT MAX(snapshot_at)
+                FROM public.fpl_live_player_snapshots
+            )
+        ),
+        latest_season AS (
+            SELECT MAX(season) AS season
+            FROM public.fpl_completed_gameweek_stats
+        ),
+        recent_gameweeks AS (
+            SELECT DISTINCT stats.gameweek
+            FROM public.fpl_completed_gameweek_stats AS stats
+            INNER JOIN latest_season
+                ON stats.season = latest_season.season
+            ORDER BY stats.gameweek DESC
+            LIMIT :form_gameweeks
+        ),
+        form_stats AS (
+            SELECT
+                stats.player_id,
+                SUM(COALESCE(stats.fixture_count, 0)) AS form_fixtures,
+                SUM(COALESCE(stats.minutes, 0)) AS form_minutes,
+                SUM(COALESCE(stats.starts, 0)) AS form_starts,
+                SUM(COALESCE(stats.total_points, 0)) AS form_points,
+                SUM(COALESCE(stats.bonus, 0)) AS form_bonus,
+                SUM(COALESCE(stats.expected_goal_involvements, 0)) AS form_xgi,
+                SUM(COALESCE(stats.clean_sheets, 0)) AS form_clean_sheets,
+                SUM(COALESCE(stats.defensive_contribution, 0))
+                    AS form_defensive_contribution
+            FROM public.fpl_completed_gameweek_stats AS stats
+            INNER JOIN latest_season
+                ON stats.season = latest_season.season
+            INNER JOIN recent_gameweeks
+                ON stats.gameweek = recent_gameweeks.gameweek
+            GROUP BY stats.player_id
+        ),
+        live_teams AS (
+            SELECT DISTINCT team_id, team_name
+            FROM latest_live
+        ),
+        team_fixtures AS (
+            SELECT
+                teams.team_id,
+                fixtures.kickoff_time,
+                fixtures.gameweek,
+                fixtures.away_team_name AS opponent_team_name,
+                fixtures.home_difficulty AS fixture_difficulty,
+                'H' AS venue
+            FROM live_teams AS teams
+            INNER JOIN public.fpl_fixtures AS fixtures
+                ON fixtures.home_team_id = teams.team_id
+            WHERE COALESCE(fixtures.finished, false) = false
+              AND fixtures.kickoff_time >= now()
+
+            UNION ALL
+
+            SELECT
+                teams.team_id,
+                fixtures.kickoff_time,
+                fixtures.gameweek,
+                fixtures.home_team_name AS opponent_team_name,
+                fixtures.away_difficulty AS fixture_difficulty,
+                'A' AS venue
+            FROM live_teams AS teams
+            INNER JOIN public.fpl_fixtures AS fixtures
+                ON fixtures.away_team_id = teams.team_id
+            WHERE COALESCE(fixtures.finished, false) = false
+              AND fixtures.kickoff_time >= now()
+        ),
+        ranked_team_fixtures AS (
+            SELECT
+                *,
+                ROW_NUMBER() OVER (
+                    PARTITION BY team_id
+                    ORDER BY kickoff_time, gameweek
+                ) AS fixture_number
+            FROM team_fixtures
+        ),
+        fixture_horizon AS (
+            SELECT
+                team_id,
+                ROUND(AVG(fixture_difficulty)::numeric, 2) AS average_fdr,
+                STRING_AGG(
+                    opponent_team_name || ' (' || venue || ')',
+                    ', ' ORDER BY kickoff_time
+                ) AS upcoming_fixtures
+            FROM ranked_team_fixtures
+            WHERE fixture_number <= :horizon
+            GROUP BY team_id
+        ),
+        candidates AS (
+            SELECT
+                live.player_id,
+                COALESCE(live.web_name,
+                         CONCAT_WS(' ', live.first_name, live.second_name))
+                    AS player_name,
+                live.team_name,
+                live.position,
+                live.price,
+                live.total_points AS live_total_points,
+                live.form AS live_form,
+                live.selected_by_percent,
+                live.chance_of_playing_next_round,
+                form.form_fixtures,
+                form.form_minutes,
+                form.form_starts,
+                form.form_points,
+                form.form_bonus,
+                form.form_xgi,
+                form.form_clean_sheets,
+                form.form_defensive_contribution,
+                fixture.average_fdr,
+                fixture.upcoming_fixtures,
+                CASE WHEN form.form_minutes > 0
+                    THEN form.form_xgi * 90.0 / form.form_minutes
+                END AS form_xgi_per_90,
+                CASE WHEN form.form_fixtures > 0
+                    THEN form.form_clean_sheets * 1.0 / form.form_fixtures
+                END AS form_clean_sheet_rate,
+                CASE WHEN form.form_minutes > 0
+                    THEN form.form_defensive_contribution * 90.0 / form.form_minutes
+                END AS form_defensive_contribution_per_90,
+                CASE WHEN live.price > 0
+                    THEN form.form_points * 1.0 / live.price
+                END AS form_points_per_price
+            FROM latest_live AS live
+            INNER JOIN form_stats AS form
+                ON form.player_id = live.player_id
+            INNER JOIN fixture_horizon AS fixture
+                ON fixture.team_id = live.team_id
+            WHERE live.position = :position
+              AND COALESCE(live.status, 'a') = 'a'
+              AND (:max_price IS NULL OR live.price <= :max_price)
+              AND form.form_starts >= LEAST(
+                  2, (SELECT COUNT(*) FROM recent_gameweeks)
+              )
+        )
+        SELECT *
+        FROM candidates
+        ORDER BY {profile["order_by"]}
+        LIMIT :limit
+        """,
+        {
+            "position": position,
+            "max_price": max_price,
+            "horizon": horizon,
+            "form_gameweeks": form_gameweeks,
+            "limit": limit,
+        },
+    )
+    return {
+        "source": (
+            "latest stored live player snapshot, finalized current-season "
+            "gameweek totals, and stored live fixtures"
+        ),
+        "position": position,
+        "max_price": max_price,
+        "horizon": horizon,
+        "form_gameweeks": form_gameweeks,
+        "ranking_basis": profile["basis"],
+        "rows": _records(rows),
+    }
+
 def get_fpl_data_status():
     """Describe historical coverage and the newest stored live FPL snapshot."""
     players = _read_dataframe(
