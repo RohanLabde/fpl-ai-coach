@@ -18,6 +18,7 @@ _ALLOWED_INTENTS = {
     "compare_players",
     "team_fixture_horizon",
     "team_strength",
+    "fpl_picks",
     "unsupported",
 }
 _ALLOWED_POSITIONS = {"GKP", "DEF", "MID", "FWD", "NONE"}
@@ -47,6 +48,7 @@ _ALLOWED_SCOPES = {
     "team_attacking_form",
     "team_defensive_form",
     "data_coverage",
+    "fpl_pick_research",
     "unknown",
 }
 
@@ -65,6 +67,8 @@ Use these intents only:
 - compare_players: comparison of exactly two named players.
 - team_fixture_horizon: rank all teams by the difficulty of their next N fixtures.
 - team_strength: rank teams by recent attacking or defensive form.
+- fpl_picks: transparent, non-personal MID or DEF candidate ranking using
+  recent finalized form, upcoming fixture difficulty, price, and starts.
 - unsupported: transfer, captaincy, squad, chip, or injury/line-up advice that
   cannot be grounded with the currently available data.
 
@@ -85,6 +89,10 @@ Use recent_form for questions about a player's last N gameweeks, defaulting to
 present in the question or clearly resolved from the supplied conversation
 context. Return unsupported rather than guessing a player or claiming the app
 can see the user's FPL team.
+Use fpl_picks only for midfielders or defenders when the question explicitly
+asks for FPL picks/options/value or combines a position with upcoming fixtures.
+Set max_price only when the user supplies a budget in £m. This is not transfer
+advice: it is a transparent candidate list.
 """.strip()
 
 QUERY_PLAN_SCHEMA = {
@@ -102,6 +110,7 @@ QUERY_PLAN_SCHEMA = {
         "scope": {"type": "string", "enum": sorted(_ALLOWED_SCOPES)},
         "gameweeks": {"type": "integer", "minimum": 1, "maximum": 10},
         "limit": {"type": "integer", "minimum": 1, "maximum": 15},
+        "max_price": {"type": ["number", "null"], "minimum": 3, "maximum": 20},
         "needs_clarification": {"type": "boolean"},
         "clarification": {"type": "string"},
     },
@@ -113,6 +122,7 @@ QUERY_PLAN_SCHEMA = {
         "scope",
         "gameweeks",
         "limit",
+        "max_price",
         "needs_clarification",
         "clarification",
     ],
@@ -144,6 +154,13 @@ def _bounded_int(value, lower, upper, default):
         return default
 
 
+def _bounded_price(value):
+    try:
+        return max(3.0, min(float(value), 20.0))
+    except (TypeError, ValueError):
+        return None
+
+
 def normalise_query_plan(raw):
     """Validate a model plan and apply safe, position-aware defaults."""
     raw = raw if isinstance(raw, dict) else {}
@@ -157,6 +174,18 @@ def normalise_query_plan(raw):
         metric = _default_metric(position)
     if intent == "team_strength" and metric not in {"attacking", "defensive"}:
         metric = "attacking"
+    clarification = str(raw.get("clarification") or "").strip()
+    needs_clarification = bool(raw.get("needs_clarification"))
+    if intent == "fpl_picks":
+        if position not in {"MID", "DEF"}:
+            intent = "unsupported"
+            needs_clarification = True
+            clarification = (
+                "I can currently provide transparent FPL pick candidates for "
+                "midfielders or defenders."
+            )
+        elif scope == "unknown":
+            scope = "fpl_pick_research"
     if intent == "leaderboard" and scope == "unknown":
         scope = {
             "DEF": "defensive_form",
@@ -165,8 +194,6 @@ def normalise_query_plan(raw):
             "FWD": "attacking_form",
         }.get(position, "fpl_points")
 
-    clarification = str(raw.get("clarification") or "").strip()
-    needs_clarification = bool(raw.get("needs_clarification"))
 
     required_names = {
         "player_form": 1,
@@ -193,6 +220,7 @@ def normalise_query_plan(raw):
         "scope": scope,
         "gameweeks": _bounded_int(raw.get("gameweeks"), 1, 10, 5),
         "limit": _bounded_int(raw.get("limit"), 1, 15, 10),
+        "max_price": _bounded_price(raw.get("max_price")) if intent == "fpl_picks" else None,
         "needs_clarification": needs_clarification,
         "clarification": clarification,
     }
