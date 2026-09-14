@@ -57,6 +57,35 @@ class DeterministicQuestionEvaluationTests(unittest.TestCase):
                 self.assertEqual(plan["arguments"]["position"], position)
                 self.assertEqual(plan["arguments"]["metric"], metric)
 
+    def test_position_specific_pick_queries_have_transparent_data_plans(self):
+        cases = [
+            (
+                "Give me the top 5 midfield picks under £8m for the next 5 fixtures",
+                "MID",
+                8.0,
+                5,
+                5,
+            ),
+            (
+                "Which defenders are the best picks for the next 4 fixtures?",
+                "DEF",
+                None,
+                4,
+                10,
+            ),
+        ]
+
+        for question, position, budget, horizon, limit in cases:
+            with self.subTest(question=question):
+                plan = route_fpl_question(question)
+                self.assertIsNotNone(plan)
+                self.assertEqual(plan["intent"], "fpl_picks")
+                self.assertEqual(plan["tool_name"], "get_fpl_pick_leaderboard")
+                self.assertEqual(plan["arguments"]["position"], position)
+                self.assertEqual(plan["arguments"]["max_price"], budget)
+                self.assertEqual(plan["arguments"]["horizon"], horizon)
+                self.assertEqual(plan["arguments"]["limit"], limit)
+
     def test_structured_player_plans_preserve_required_fields(self):
         cases = [
             (
