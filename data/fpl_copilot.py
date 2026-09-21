@@ -584,7 +584,7 @@ _PROFILE_FOLLOWUP_TERMS = (
     "selected by",
 )
 _FULL_NAME_FOLLOWUP = re.compile(
-    r"^[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'’-]*(?:\\s+[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'’-]*)+$"
+    r"^[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'’-]*(?:\s+[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'’-]*)+$"
 )
 
 
