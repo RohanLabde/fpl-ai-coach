@@ -161,6 +161,46 @@ def _bounded_price(value):
         return None
 
 
+_PROFILE_SIGNAL_WORDS = (
+    "price",
+    "ownership",
+    "owned",
+    "availability",
+    "available",
+    "status",
+    "current form",
+    "selected by",
+)
+
+
+def _deterministic_profile_plan(question):
+    """Handle common possessive player-profile wording without model routing."""
+    normalized = " ".join(str(question).lower().split())
+    if not any(signal in normalized for signal in _PROFILE_SIGNAL_WORDS):
+        return None
+
+    match = re.search(r"\b([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'’-]{1,})[’']s\b", str(question))
+    if not match:
+        return None
+
+    name = match.group(1)
+    if name.casefold() in {"team", "player", "fpl"}:
+        return None
+    return normalise_query_plan(
+        {
+            "intent": "player_profile",
+            "player_names": [name],
+            "position": "NONE",
+            "metric": "NONE",
+            "scope": "player_research",
+            "gameweeks": 5,
+            "limit": 10,
+            "max_price": None,
+            "needs_clarification": False,
+            "clarification": "",
+        }
+    )
+
 def normalise_query_plan(raw):
     """Validate a model plan and apply safe, position-aware defaults."""
     raw = raw if isinstance(raw, dict) else {}
@@ -228,6 +268,10 @@ def normalise_query_plan(raw):
 
 def plan_fpl_question(client, model, question, conversation_context=""):
     """Ask OpenAI for a constrained plan, then validate it locally."""
+    deterministic_profile = _deterministic_profile_plan(question)
+    if deterministic_profile:
+        return deterministic_profile
+
     response = client.responses.create(
         model=model,
         instructions=PLANNER_INSTRUCTIONS,
