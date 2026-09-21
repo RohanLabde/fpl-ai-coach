@@ -1,6 +1,7 @@
 """Grounded, read-only FPL chat assistant for the Streamlit application."""
 
 import json
+import re
 from decimal import Decimal
 
 import streamlit as st
@@ -20,7 +21,7 @@ from data.db import (
     search_fpl_players,
 )
 from data.fpl_intents import route_fpl_question
-from data.fpl_query_planner import plan_fpl_question
+from data.fpl_query_planner import normalise_query_plan, plan_fpl_question
 
 try:
     from openai import OpenAI
@@ -572,6 +573,66 @@ def _resolve_planned_player(name):
     )
 
 
+_PROFILE_FOLLOWUP_TERMS = (
+    "price",
+    "ownership",
+    "owned",
+    "availability",
+    "available",
+    "status",
+    "current form",
+    "selected by",
+)
+_FULL_NAME_FOLLOWUP = re.compile(
+    r"^[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'’-]*(?:\\s+[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'’-]*)+$"
+)
+
+
+def _pending_player_profile_followup_plan(question, messages):
+    """Resolve a full-name reply to a previously ambiguous profile lookup."""
+    name = " ".join(str(question).strip().rstrip(".?!").split())
+    if not _FULL_NAME_FOLLOWUP.fullmatch(name):
+        return None
+
+    previous_messages = messages[:-1] if messages else []
+    last_assistant = next(
+        (
+            message.get("content", "")
+            for message in reversed(previous_messages)
+            if message.get("role") == "assistant"
+        ),
+        "",
+    )
+    if "specify the player's full name or team" not in last_assistant.casefold():
+        return None
+
+    prior_question = next(
+        (
+            message.get("content", "")
+            for message in reversed(previous_messages)
+            if message.get("role") == "user"
+        ),
+        "",
+    ).casefold()
+    if not any(term in prior_question for term in _PROFILE_FOLLOWUP_TERMS):
+        return None
+
+    return normalise_query_plan(
+        {
+            "intent": "player_profile",
+            "player_names": [name],
+            "position": "NONE",
+            "metric": "NONE",
+            "scope": "player_research",
+            "gameweeks": 5,
+            "limit": 10,
+            "max_price": None,
+            "needs_clarification": False,
+            "clarification": "",
+        }
+    )
+
+
 def _conversation_context(messages):
     """Provide the planner with a compact recent conversation, not raw history."""
     recent = messages[-6:]
@@ -584,12 +645,14 @@ def _conversation_context(messages):
 
 def _answer_planned_question(client, model, question, messages):
     """Plan, validate, resolve, then execute only a permitted read-only lookup."""
-    plan = plan_fpl_question(
-        client,
-        model,
-        question,
-        conversation_context=_conversation_context(messages),
-    )
+    plan = _pending_player_profile_followup_plan(question, messages)
+    if plan is None:
+        plan = plan_fpl_question(
+            client,
+            model,
+            question,
+            conversation_context=_conversation_context(messages),
+        )
 
     if plan["intent"] == "unsupported" or plan["needs_clarification"]:
         return (
