@@ -11,6 +11,7 @@ if _FORMATTERS_AVAILABLE:
     from data.fpl_copilot import (
         _fallback_player_comparison_answer,
         _fallback_player_profile_answer,
+        _pending_player_profile_followup_plan,
     )
 
 
@@ -18,6 +19,29 @@ if _FORMATTERS_AVAILABLE:
     _FORMATTERS_AVAILABLE, "requires the application's optional runtime packages"
 )
 class PlayerAnswerFormatTests(unittest.TestCase):
+    def test_full_name_follow_up_completes_ambiguous_profile_request(self):
+        messages = [
+            {
+                "role": "user",
+                "content": "What is Palmer's price, ownership, availability, and current form?",
+            },
+            {
+                "role": "assistant",
+                "content": (
+                    "I found several matches for Palmer. "
+                    "Please specify the player's full name or team."
+                ),
+            },
+            {"role": "user", "content": "Cole Palmer"},
+        ]
+
+        plan = _pending_player_profile_followup_plan("Cole Palmer", messages)
+
+        self.assertIsNotNone(plan)
+        self.assertEqual(plan["intent"], "player_profile")
+        self.assertEqual(plan["player_names"], ["Cole Palmer"])
+        self.assertFalse(plan["needs_clarification"])
+
     def test_profile_renders_live_fields_and_availability(self):
         answer = _fallback_player_profile_answer(
             {
