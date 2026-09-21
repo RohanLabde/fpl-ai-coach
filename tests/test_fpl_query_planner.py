@@ -3,10 +3,21 @@
 import unittest
 
 from data.fpl_intents import route_fpl_question
-from data.fpl_query_planner import normalise_query_plan
+from data.fpl_query_planner import normalise_query_plan, plan_fpl_question
 
 
 class FplQueryPlanTests(unittest.TestCase):
+    def test_possessive_profile_question_bypasses_model_planner(self):
+        plan = plan_fpl_question(
+            None,
+            None,
+            "What is Palmer's price, ownership, availability, and current form?",
+        )
+
+        self.assertEqual(plan["intent"], "player_profile")
+        self.assertEqual(plan["player_names"], ["Palmer"])
+        self.assertFalse(plan["needs_clarification"])
+
     def test_defender_without_metric_uses_defensive_profile(self):
         plan = normalise_query_plan(
             {
