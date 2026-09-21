@@ -201,6 +201,39 @@ def _deterministic_profile_plan(question):
         }
     )
 
+
+_PLAYER_FORM_PATTERN = re.compile(
+    r"^\s*how\s+has\s+"
+    r"(?P<name>[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'’-]*(?:\s+[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'’-]*){0,3})"
+    r"\s+performed"
+    r"(?:\s+(?:over\s+)?(?:the\s+)?(?:last|recent)\s+"
+    r"(?P<gameweeks>\d{1,2})\s+game\s*weeks?)?\s*[?!.]*\s*$",
+    re.IGNORECASE,
+)
+
+
+def _deterministic_player_form_plan(question):
+    """Route explicit 'How has [player] performed?' form questions locally."""
+    match = _PLAYER_FORM_PATTERN.match(str(question))
+    if not match:
+        return None
+
+    return normalise_query_plan(
+        {
+            "intent": "player_form",
+            "player_names": [match.group("name")],
+            "position": "NONE",
+            "metric": "NONE",
+            "scope": "performance",
+            "gameweeks": match.group("gameweeks") or 5,
+            "limit": 10,
+            "max_price": None,
+            "needs_clarification": False,
+            "clarification": "",
+        }
+    )
+
+
 def normalise_query_plan(raw):
     """Validate a model plan and apply safe, position-aware defaults."""
     raw = raw if isinstance(raw, dict) else {}
@@ -271,6 +304,10 @@ def plan_fpl_question(client, model, question, conversation_context=""):
     deterministic_profile = _deterministic_profile_plan(question)
     if deterministic_profile:
         return deterministic_profile
+
+    deterministic_player_form = _deterministic_player_form_plan(question)
+    if deterministic_player_form:
+        return deterministic_player_form
 
     response = client.responses.create(
         model=model,
