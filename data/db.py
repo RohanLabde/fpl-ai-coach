@@ -1299,7 +1299,7 @@ def compare_fpl_players(player_a_id, player_b_id):
 
 
 def get_current_season_leaderboard(
-    metric="attacking", position=None, limit=10, minimum_starts=2
+    metric="points", position=None, limit=10, minimum_starts=2
 ):
     """Rank current-season players using transparent, position-aware profiles."""
     metric = metric.lower()
