@@ -1512,6 +1512,22 @@ def get_fpl_pick_leaderboard(
                 ON stats.gameweek = recent_gameweeks.gameweek
             GROUP BY stats.player_id
         ),
+        season_stats AS (
+            SELECT
+                stats.player_id,
+                SUM(COALESCE(stats.fixture_count, 0)) AS season_fixtures,
+                SUM(COALESCE(stats.minutes, 0)) AS season_minutes,
+                SUM(COALESCE(stats.starts, 0)) AS season_starts,
+                SUM(COALESCE(stats.total_points, 0)) AS season_points,
+                SUM(COALESCE(stats.goals_scored, 0)) AS season_goals,
+                SUM(COALESCE(stats.assists, 0)) AS season_assists,
+                SUM(COALESCE(stats.bonus, 0)) AS season_bonus,
+                SUM(COALESCE(stats.expected_goal_involvements, 0)) AS season_xgi
+            FROM public.fpl_completed_gameweek_stats AS stats
+            INNER JOIN latest_season
+                ON stats.season = latest_season.season
+            GROUP BY stats.player_id
+        ),
         live_teams AS (
             SELECT DISTINCT team_id, team_name
             FROM latest_live
@@ -1575,10 +1591,19 @@ def get_fpl_pick_leaderboard(
                 live.team_name,
                 live.position,
                 live.price,
+                live.status,
                 live.total_points AS live_total_points,
                 live.form AS live_form,
                 live.selected_by_percent,
                 live.chance_of_playing_next_round,
+                season.season_fixtures,
+                season.season_minutes,
+                season.season_starts,
+                season.season_points,
+                season.season_goals,
+                season.season_assists,
+                season.season_bonus,
+                season.season_xgi,
                 form.form_fixtures,
                 form.form_minutes,
                 form.form_starts,
@@ -1604,6 +1629,8 @@ def get_fpl_pick_leaderboard(
             FROM latest_live AS live
             INNER JOIN form_stats AS form
                 ON form.player_id = live.player_id
+            INNER JOIN season_stats AS season
+                ON season.player_id = live.player_id
             INNER JOIN fixture_horizon AS fixture
                 ON fixture.team_id = live.team_id
             WHERE live.position = :position
@@ -1636,6 +1663,9 @@ def get_fpl_pick_leaderboard(
         "horizon": horizon,
         "form_gameweeks": form_gameweeks,
         "ranking_basis": profile["basis"],
+        "minimum_recent_starts": min(
+            2, len({row["gameweek"] for row in _records(rows)}) or form_gameweeks
+        ),
         "rows": _records(rows),
     }
 
