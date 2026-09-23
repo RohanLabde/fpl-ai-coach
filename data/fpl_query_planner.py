@@ -8,6 +8,8 @@ which this module validates before the application executes any read-only tool.
 import json
 import re
 
+from data.fpl_intents import route_fpl_question
+
 
 _ALLOWED_INTENTS = {
     "data_status",
@@ -127,6 +129,68 @@ QUERY_PLAN_SCHEMA = {
         "clarification",
     ],
 }
+
+
+
+_NUMBER_WORDS = {
+    "one": "1",
+    "two": "2",
+    "three": "3",
+    "four": "4",
+    "five": "5",
+    "six": "6",
+    "seven": "7",
+    "eight": "8",
+    "nine": "9",
+    "ten": "10",
+}
+
+
+def normalise_question_text(question):
+    """Normalize harmless FPL language variation before intent interpretation."""
+    normalized = str(question or "").casefold()
+    normalized = normalized.replace("’", "'").replace("–", "-").replace("—", "-")
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    for word, number in _NUMBER_WORDS.items():
+        normalized = re.sub(r"\b" + word + r"\b", number, normalized)
+    normalized = re.sub(r"\bgame[\s-]*weeks?\b", "gameweeks", normalized)
+    normalized = re.sub(r"\bgws?\s*(\d{1,2})\b", r"gameweek \1", normalized)
+    normalized = re.sub(r"\b(\d{1,2})\s*gws?\b", r"\1 gameweeks", normalized)
+    return normalized
+
+
+def _plan_from_routed_question(question):
+    """Translate every deterministic route into the common query-plan contract."""
+    routed = route_fpl_question(normalise_question_text(question))
+    if not routed:
+        return None
+
+    arguments = routed.get("arguments", {})
+    intent = routed.get("intent")
+    raw = {
+        "intent": {
+            "current_season_leaderboard": "leaderboard",
+        }.get(intent, intent),
+        "player_names": [],
+        "position": arguments.get("position") or "NONE",
+        "metric": arguments.get("metric") or "NONE",
+        "scope": {
+            "data_status": "data_coverage",
+            "current_season_leaderboard": "performance",
+            "team_fixture_horizon": "fixture_horizon",
+            "team_strength": "team_attacking_form"
+            if arguments.get("metric") == "attacking"
+            else "team_defensive_form",
+            "fpl_picks": "fpl_pick_research",
+        }.get(intent, "unknown"),
+        "gameweeks": arguments.get("gameweeks", arguments.get("horizon", 5)),
+        "limit": arguments.get("limit", 10),
+        "max_price": arguments.get("max_price"),
+        "needs_clarification": False,
+        "clarification": "",
+    }
+    return normalise_query_plan(raw)
+
 
 
 def _default_metric(position):
@@ -308,6 +372,10 @@ def plan_fpl_question(client, model, question, conversation_context=""):
     deterministic_player_form = _deterministic_player_form_plan(question)
     if deterministic_player_form:
         return deterministic_player_form
+
+    routed_plan = _plan_from_routed_question(question)
+    if routed_plan:
+        return routed_plan
 
     response = client.responses.create(
         model=model,
