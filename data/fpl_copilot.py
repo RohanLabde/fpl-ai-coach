@@ -671,7 +671,7 @@ def _resolve_planned_player(name, team_hint=None):
 
 
 _PLAYER_REPLY_PATTERN = re.compile(
-    r"^\s*(?P<name>[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'’-]*(?:\s+[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'’-]*){0,3})"
+    r"^\s*(?P<name>[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'’-]*(?:\s+[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'’-]*){0,3}?)"
     r"(?:\s+(?:from|at|of)\s+(?P<team>[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'’ -]*))?\s*[.?!]*\s*$",
     re.IGNORECASE,
 )
