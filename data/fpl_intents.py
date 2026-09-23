@@ -30,13 +30,14 @@ _EASY_FIXTURE_WORDS = ("easiest", "easy", "best run", "lowest difficulty")
 _TEAM_STRENGTH_WORDS = ("best", "strongest", "top", "leader", "leaders", "rank")
 _PICK_WORDS = ("pick", "picks", "option", "options", "recommend", "value")
 
-# These are answer-design defaults, not claims that other metrics are irrelevant.
+# “Top” means FPL performance unless the question explicitly asks for a
+# statistical profile. Defence and goalkeeping retain their specialised defaults.
 # A request for a different explicit metric always overrides the profile.
 _POSITION_DEFAULT_METRICS = {
     "GKP": "goalkeeping",
     "DEF": "defensive",
-    "MID": "attacking",
-    "FWD": "attacking",
+    "MID": "points",
+    "FWD": "points",
 }
 
 
