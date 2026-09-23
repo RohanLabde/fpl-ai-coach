@@ -77,8 +77,8 @@ Use these intents only:
 Position-aware ranking defaults:
 - DEF + unspecified "best" -> defensive.
 - GKP + unspecified "best" -> goalkeeping.
-- MID or FWD + unspecified "best" -> attacking.
-- No position + unspecified "best" -> points.
+- MID or FWD + unspecified "best" -> FPL points.
+- No position + unspecified "best" -> FPL points.
 Explicit wording such as goals, assists, clean sheets, defensive contribution,
 FPL points, threat, creativity, xGI, or attacking always overrides a default.
 
@@ -92,7 +92,8 @@ present in the question or clearly resolved from the supplied conversation
 context. Return unsupported rather than guessing a player or claiming the app
 can see the user's FPL team.
 Use fpl_picks only for midfielders or defenders when the question explicitly
-asks for FPL picks/options/value or combines a position with upcoming fixtures.
+asks for FPL picks/options/value, supplies a budget, or combines a position
+with upcoming fixtures.
 Set max_price only when the user supplies a budget in £m. For fpl_picks,
 gameweeks is the future-fixture horizon and form_gameweeks is the separate
 recent-form window; default form_gameweeks to 3. This is not transfer advice:
@@ -204,8 +205,8 @@ def _default_metric(position):
     return {
         "DEF": "defensive",
         "GKP": "goalkeeping",
-        "MID": "attacking",
-        "FWD": "attacking",
+        "MID": "points",
+        "FWD": "points",
     }.get(position, "points")
 
 
@@ -331,12 +332,15 @@ def normalise_query_plan(raw):
         elif scope == "unknown":
             scope = "fpl_pick_research"
     if intent == "leaderboard" and scope == "unknown":
-        scope = {
-            "DEF": "defensive_form",
-            "GKP": "goalkeeping_form",
-            "MID": "attacking_form",
-            "FWD": "attacking_form",
-        }.get(position, "fpl_points")
+        if metric == "points":
+            scope = "fpl_points"
+        else:
+            scope = {
+                "DEF": "defensive_form",
+                "GKP": "goalkeeping_form",
+                "MID": "attacking_form",
+                "FWD": "attacking_form",
+            }.get(position, "fpl_points")
 
 
     required_names = {
