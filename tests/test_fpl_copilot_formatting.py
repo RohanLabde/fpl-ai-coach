@@ -12,7 +12,7 @@ if _FORMATTERS_AVAILABLE:
         _fallback_player_comparison_answer,
         _fallback_player_form_answer,
         _fallback_player_profile_answer,
-        _pending_player_profile_followup_plan,
+        _pending_player_followup_plan,
     )
 
 
@@ -20,27 +20,30 @@ if _FORMATTERS_AVAILABLE:
     _FORMATTERS_AVAILABLE, "requires the application's optional runtime packages"
 )
 class PlayerAnswerFormatTests(unittest.TestCase):
-    def test_full_name_follow_up_completes_ambiguous_profile_request(self):
-        messages = [
-            {
-                "role": "user",
-                "content": "What is Palmer's price, ownership, availability, and current form?",
-            },
-            {
-                "role": "assistant",
-                "content": (
-                    "I found several matches for Palmer. "
-                    "Please specify the player's full name or team."
-                ),
-            },
-            {"role": "user", "content": "Cole Palmer"},
-        ]
+    def test_full_name_follow_up_uses_explicit_pending_state(self):
+        context = {
+            "pending_player_plan": {
+                "intent": "player_form",
+                "player_names": ["Raya"],
+                "position": None,
+                "metric": None,
+                "scope": "performance",
+                "gameweeks": 3,
+                "limit": 10,
+                "max_price": None,
+                "needs_clarification": False,
+                "clarification": "",
+            }
+        }
 
-        plan = _pending_player_profile_followup_plan("Cole Palmer", messages)
+        plan, team_hint = _pending_player_followup_plan(
+            "David Raya from Arsenal", context
+        )
 
         self.assertIsNotNone(plan)
-        self.assertEqual(plan["intent"], "player_profile")
-        self.assertEqual(plan["player_names"], ["Cole Palmer"])
+        self.assertEqual(plan["intent"], "player_form")
+        self.assertEqual(plan["player_names"], ["David Raya"])
+        self.assertEqual(team_hint, "Arsenal")
         self.assertFalse(plan["needs_clarification"])
 
     def test_recent_form_shows_official_total_and_scoring_events(self):
