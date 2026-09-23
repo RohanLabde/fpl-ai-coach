@@ -3,10 +3,40 @@
 import unittest
 
 from data.fpl_intents import route_fpl_question
-from data.fpl_query_planner import normalise_query_plan, plan_fpl_question
+from data.fpl_query_planner import (\n    normalise_question_text,\n    normalise_query_plan,\n    plan_fpl_question,\n)
 
 
 class FplQueryPlanTests(unittest.TestCase):
+    def test_question_normalization_preserves_player_name_and_normalizes_window(self):
+        plan = plan_fpl_question(
+            None,
+            None,
+            "How has Raya performed in the last three game weeks?",
+        )
+
+        self.assertEqual(plan["intent"], "player_form")
+        self.assertEqual(plan["player_names"], ["Raya"])
+        self.assertEqual(plan["gameweeks"], 3)
+        self.assertEqual(
+            normalise_question_text("Last three game weeks"),
+            "Last 3 gameweeks",
+        )
+
+    def test_common_deterministic_routes_share_the_query_plan_contract(self):
+        cases = [
+            ("Which team has the easiest next five fixtures?", "team_fixture_horizon"),
+            ("Top 5 defenders this season", "leaderboard"),
+            (
+                "Give me the top 5 midfield picks under £8m for the next 3 fixtures",
+                "fpl_picks",
+            ),
+        ]
+        for question, intent in cases:
+            with self.subTest(question=question):
+                plan = plan_fpl_question(None, None, question)
+                self.assertEqual(plan["intent"], intent)
+                self.assertFalse(plan["needs_clarification"])
+
     def test_explicit_player_form_question_bypasses_model_planner(self):
         questions = (
             "How has Raya performed over the last 3 gameweeks?",
