@@ -782,7 +782,7 @@ def _answer_planned_question(client, model, question, messages, conversation_sta
                 "position": plan["position"],
                 "max_price": plan["max_price"],
                 "horizon": plan["gameweeks"],
-                "form_gameweeks": 3,
+                "form_gameweeks": plan["form_gameweeks"],
                 "limit": plan["limit"],
             },
         )
