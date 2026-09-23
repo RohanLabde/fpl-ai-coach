@@ -442,55 +442,91 @@ def _fallback_player_comparison_answer(result):
 
 
 def _fallback_fpl_pick_answer(result):
-    """Render transparent, non-personal MID/DEF candidate rankings."""
+    """Render a complete, transparent MID/DEF budget shortlist."""
     rows = result.get("rows", [])
     if not rows:
-        return "I found no available players who meet the stated FPL pick criteria."
+        return "I found no available players who meet the stated FPL shortlist criteria."
 
     position = result.get("position", "FPL")
     horizon = result.get("horizon", 5)
     form_gameweeks = result.get("form_gameweeks", 3)
     budget = result.get("max_price")
     basis = result.get("ranking_basis", "position-specific recent form")
+    minimum_starts = result.get("minimum_recent_starts", 2)
     eligibility = (
-        f"Available {position} players with at least two starts across the last "
-        f"{form_gameweeks} finalized gameweeks"
+        f"Available {position} players with at least {minimum_starts} recent "
+        f"start{'s' if minimum_starts != 1 else ''} across the last "
+        f"{form_gameweeks} finalized gameweek"
+        f"{'' if form_gameweeks == 1 else 's'}"
     )
     if budget is not None:
         eligibility += f" and a price of £{_format_value(budget)}m or less"
+
     lines = [
-        f"**Transparent {position} pick candidates**",
+        f"**Budget-aware {position} shortlist**",
         f"**Ranking basis: {basis}**",
-        f"{eligibility}. This is a candidate list, not personalised transfer advice.",
+        (
+            f"{eligibility}. Each entry shows season output, recent form, "
+            f"availability, and the next {horizon} fixtures."
+        ),
         "",
     ]
     for rank, row in enumerate(rows, start=1):
         name = row.get("player_name", "Unknown player")
         team = row.get("team_name", "Unknown team")
         price = _format_value(row.get("price"))
-        starts = _format_value(row.get("form_starts"), 0)
-        points = _format_value(row.get("form_points"), 0)
-        bonus = _format_value(row.get("form_bonus"), 0)
+        availability = _availability_summary(row)
+        season_points = _format_value(row.get("season_points"), 0)
+        season_starts = _format_value(row.get("season_starts"), 0)
+        season_minutes = _format_value(row.get("season_minutes"), 0)
+        season_goals = _format_value(row.get("season_goals"), 0)
+        season_assists = _format_value(row.get("season_assists"), 0)
+        season_bonus = _format_value(row.get("season_bonus"), 0)
+        season_xgi = _format_value(row.get("season_xgi"))
+        recent_points = _format_value(row.get("form_points"), 0)
+        recent_starts = _format_value(row.get("form_starts"), 0)
+        recent_xgi = _format_value(row.get("form_xgi"))
+        recent_xgi_per_90 = _format_value(row.get("form_xgi_per_90"))
         fdr = _format_value(row.get("average_fdr"), 2)
         fixtures = row.get("upcoming_fixtures") or "—"
+        ownership = _format_value(row.get("selected_by_percent"))
+
+        lines.extend(
+            [
+                (
+                    f"{rank}. **{name}** ({team}) — **£{price}m**; "
+                    f"{availability}; {ownership}% owned."
+                ),
+                (
+                    f"   - Season: {season_points} FPL points; "
+                    f"{season_goals} goals, {season_assists} assists, "
+                    f"{season_bonus} bonus; {season_starts} starts / "
+                    f"{season_minutes} minutes; {season_xgi} xGI."
+                ),
+            ]
+        )
         if position == "DEF":
-            output = (
-                f"{_format_percentage(row.get('form_clean_sheet_rate'))} clean-sheet rate; "
+            recent_detail = (
+                f"{_format_percentage(row.get('form_clean_sheet_rate'))} "
+                "clean-sheet rate; "
                 f"{_format_value(row.get('form_defensive_contribution_per_90'))} "
                 "defensive contribution per 90"
             )
         else:
-            output = (
-                f"{_format_value(row.get('form_xgi'))} xGI; "
-                f"{_format_value(row.get('form_xgi_per_90'))} xGI per 90"
-            )
-        lines.append(
-            f"{rank}. **{name}** ({team}, £{price}m) — {output}; "
-            f"{points} recent FPL points ({bonus} bonus); {starts} starts; "
-            f"next {horizon} average FDR {fdr}. Fixtures: {fixtures}."
+            recent_detail = f"{recent_xgi} xGI ({recent_xgi_per_90} per 90)"
+        lines.extend(
+            [
+                (
+                    f"   - Recent {form_gameweeks} GW form: {recent_points} points; "
+                    f"{recent_starts} starts; {recent_detail}."
+                ),
+                (
+                    f"   - Next {horizon}: average FDR {fdr}. Fixtures: {fixtures}."
+                ),
+            ]
         )
-    return "\n".join(lines)
 
+    return "\n".join(lines)
 
 def _fallback_evidence_answer(plan, result):
     """Return a useful, fully grounded answer when text generation is empty."""
