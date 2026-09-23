@@ -3,7 +3,11 @@
 import unittest
 
 from data.fpl_intents import route_fpl_question
-from data.fpl_query_planner import (\n    normalise_question_text,\n    normalise_query_plan,\n    plan_fpl_question,\n)
+from data.fpl_query_planner import (
+    normalise_question_text,
+    normalise_query_plan,
+    plan_fpl_question,
+)
 
 
 class FplQueryPlanTests(unittest.TestCase):
