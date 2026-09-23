@@ -310,6 +310,86 @@ def _fallback_player_profile_answer(result):
     return "\n".join(lines)
 
 
+
+def _form_deduction_summary(row):
+    """List recorded FPL deduction events without reverse-engineering totals."""
+    labels = (
+        ("yellow_cards", "yellow card"),
+        ("red_cards", "red card"),
+        ("own_goals", "own goal"),
+        ("penalties_missed", "penalty missed"),
+        ("goals_conceded", "goal conceded"),
+    )
+    parts = []
+    for field, label in labels:
+        count = _format_value(row.get(field), 0)
+        if count != "0":
+            suffix = "" if count == "1" else "s"
+            parts.append(f"{count} {label}{suffix}")
+    return ", ".join(parts) if parts else "none recorded"
+
+
+def _fallback_player_form_answer(result):
+    """Render gameweek form with the event detail behind official FPL totals."""
+    rows = result.get("rows", [])
+    if not rows:
+        return "I could not find finalized recent form data for that player."
+
+    name = rows[0].get("player_name") or "This player"
+    source = result.get("source")
+    lines = [
+        f"**Recent FPL form — {name}**",
+        "Each total is the official FPL score. The detail below shows the "
+        "recorded scoring events behind it.",
+    ]
+    if source:
+        lines.append(f"Source: {source}.")
+    lines.append("")
+
+    for row in rows:
+        gameweek = _format_value(row.get("gameweek"), 0)
+        total_points = _format_value(row.get("total_points"), 0)
+        minutes = _format_value(row.get("minutes"), 0)
+        starts = _format_value(row.get("starts"), 0)
+        lines.extend(
+            [
+                f"**GW {gameweek} — {total_points} FPL points**",
+                f"- Playing time: {minutes} minutes; {starts} starts",
+                (
+                    "- Attacking events: "
+                    f"{_format_value(row.get('goals_scored'), 0)} goals, "
+                    f"{_format_value(row.get('assists'), 0)} assists"
+                ),
+                (
+                    "- Defensive/goalkeeping events: "
+                    f"{_format_value(row.get('clean_sheets'), 0)} clean sheets, "
+                    f"{_format_value(row.get('saves'), 0)} saves, "
+                    f"{_format_value(row.get('penalties_saved'), 0)} penalties saved, "
+                    f"{_format_value(row.get('goals_conceded'), 0)} goals conceded"
+                ),
+                (
+                    "- Bonus and BPS: "
+                    f"{_format_value(row.get('bonus'), 0)} bonus points; "
+                    f"{_format_value(row.get('bps'), 0)} BPS"
+                ),
+                (
+                    "- Defensive contribution: "
+                    f"{_format_value(row.get('defensive_contribution'), 0)}; "
+                    f"deductions: {_form_deduction_summary(row)}"
+                ),
+                "",
+            ]
+        )
+
+    lines.append(
+        "Note: completed-gameweek rows may combine multiple fixtures in a double "
+        "gameweek, so the app shows the official total plus its recorded events "
+        "rather than reconstructing an unreliable component-point sum."
+    )
+    return "\n".join(lines)
+
+
+
 def _fallback_player_comparison_answer(result):
     """Render a transparent, position-aware comparison from verified rows."""
     rows = result.get("rows", [])
@@ -431,6 +511,10 @@ def _fallback_evidence_answer(plan, result):
         plan.get("intent") == "player_profile"
     ):
         return _fallback_player_profile_answer(result)
+    if plan.get("tool_name") == "get_player_recent_form" or (
+        plan.get("intent") == "player_form"
+    ):
+        return _fallback_player_form_answer(result)
     if plan.get("tool_name") == "compare_fpl_players" or (
         plan.get("intent") == "compare_players"
     ):
@@ -483,6 +567,10 @@ def _compose_evidence_answer(client, model, question, plan, result, sources):
         plan.get("intent") == "player_profile"
     ):
         return _fallback_player_profile_answer(result), sources
+    if plan.get("tool_name") == "get_player_recent_form" or (
+        plan.get("intent") == "player_form"
+    ):
+        return _fallback_player_form_answer(result), sources
     if plan.get("tool_name") == "compare_fpl_players" or (
         plan.get("intent") == "compare_players"
     ):
