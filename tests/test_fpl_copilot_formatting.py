@@ -10,6 +10,7 @@ _FORMATTERS_AVAILABLE = (
 if _FORMATTERS_AVAILABLE:
     from data.fpl_copilot import (
         _fallback_player_comparison_answer,
+        _fallback_player_form_answer,
         _fallback_player_profile_answer,
         _pending_player_profile_followup_plan,
     )
@@ -41,6 +42,40 @@ class PlayerAnswerFormatTests(unittest.TestCase):
         self.assertEqual(plan["intent"], "player_profile")
         self.assertEqual(plan["player_names"], ["Cole Palmer"])
         self.assertFalse(plan["needs_clarification"])
+
+    def test_recent_form_shows_official_total_and_scoring_events(self):
+        answer = _fallback_player_form_answer(
+            {
+                "source": "completed-gameweek totals",
+                "rows": [
+                    {
+                        "player_name": "David Raya",
+                        "gameweek": 4,
+                        "total_points": 14,
+                        "minutes": 90,
+                        "starts": 1,
+                        "goals_scored": 0,
+                        "assists": 0,
+                        "clean_sheets": 1,
+                        "saves": 4,
+                        "penalties_saved": 0,
+                        "goals_conceded": 0,
+                        "bonus": 3,
+                        "bps": 38,
+                        "defensive_contribution": 8,
+                        "yellow_cards": 0,
+                        "red_cards": 0,
+                        "own_goals": 0,
+                        "penalties_missed": 0,
+                    }
+                ],
+            }
+        )
+
+        self.assertIn("**GW 4 — 14 FPL points**", answer)
+        self.assertIn("1 clean sheets, 4 saves", answer)
+        self.assertIn("3 bonus points; 38 BPS", answer)
+        self.assertIn("deductions: none recorded", answer)
 
     def test_profile_renders_live_fields_and_availability(self):
         answer = _fallback_player_profile_answer(
