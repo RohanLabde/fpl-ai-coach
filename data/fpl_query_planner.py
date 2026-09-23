@@ -206,7 +206,7 @@ _PLAYER_FORM_PATTERN = re.compile(
     r"^\s*how\s+has\s+"
     r"(?P<name>[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'’-]*(?:\s+[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'’-]*){0,3})"
     r"\s+performed"
-    r"(?:\s+(?:over\s+)?(?:the\s+)?(?:last|recent)\s+"
+    r"(?:\s+(?:(?:over|in|during)\s+)?(?:the\s+)?(?:last|recent)\s+"
     r"(?P<gameweeks>\d{1,2})\s+game\s*weeks?)?\s*[?!.]*\s*$",
     re.IGNORECASE,
 )
