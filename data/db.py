@@ -1663,9 +1663,7 @@ def get_fpl_pick_leaderboard(
         "horizon": horizon,
         "form_gameweeks": form_gameweeks,
         "ranking_basis": profile["basis"],
-        "minimum_recent_starts": min(
-            2, len({row["gameweek"] for row in _records(rows)}) or form_gameweeks
-        ),
+        "minimum_recent_starts": min(2, form_gameweeks),
         "rows": _records(rows),
     }
 
