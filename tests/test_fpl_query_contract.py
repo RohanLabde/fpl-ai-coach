@@ -58,6 +58,17 @@ class QueryPlanContractTests(unittest.TestCase):
                     "limit": 5,
                 },
             ),
+            (
+                "Give me the top 5 midfielders under 10 million from the current season",
+                {
+                    "intent": "fpl_picks",
+                    "position": "MID",
+                    "gameweeks": 5,
+                    "form_gameweeks": 3,
+                    "max_price": 10.0,
+                    "limit": 5,
+                },
+            ),
         )
 
         for question, expected in cases:
