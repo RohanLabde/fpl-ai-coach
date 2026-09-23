@@ -8,16 +8,18 @@ from data.fpl_query_planner import normalise_query_plan, plan_fpl_question
 
 class FplQueryPlanTests(unittest.TestCase):
     def test_explicit_player_form_question_bypasses_model_planner(self):
-        plan = plan_fpl_question(
-            None,
-            None,
+        questions = (
             "How has Raya performed over the last 3 gameweeks?",
+            "How has Raya performed in the last 3 game weeks?",
         )
+        for question in questions:
+            with self.subTest(question=question):
+                plan = plan_fpl_question(None, None, question)
 
-        self.assertEqual(plan["intent"], "player_form")
-        self.assertEqual(plan["player_names"], ["Raya"])
-        self.assertEqual(plan["gameweeks"], 3)
-        self.assertFalse(plan["needs_clarification"])
+                self.assertEqual(plan["intent"], "player_form")
+                self.assertEqual(plan["player_names"], ["Raya"])
+                self.assertEqual(plan["gameweeks"], 3)
+                self.assertFalse(plan["needs_clarification"])
 
     def test_possessive_profile_question_bypasses_model_planner(self):
         plan = plan_fpl_question(
