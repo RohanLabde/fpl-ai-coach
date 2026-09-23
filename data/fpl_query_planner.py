@@ -93,8 +93,10 @@ context. Return unsupported rather than guessing a player or claiming the app
 can see the user's FPL team.
 Use fpl_picks only for midfielders or defenders when the question explicitly
 asks for FPL picks/options/value or combines a position with upcoming fixtures.
-Set max_price only when the user supplies a budget in £m. This is not transfer
-advice: it is a transparent candidate list.
+Set max_price only when the user supplies a budget in £m. For fpl_picks,
+gameweeks is the future-fixture horizon and form_gameweeks is the separate
+recent-form window; default form_gameweeks to 3. This is not transfer advice:
+it is a transparent candidate list.
 """.strip()
 
 QUERY_PLAN_SCHEMA = {
@@ -111,6 +113,7 @@ QUERY_PLAN_SCHEMA = {
         "metric": {"type": "string", "enum": sorted(_ALLOWED_METRICS)},
         "scope": {"type": "string", "enum": sorted(_ALLOWED_SCOPES)},
         "gameweeks": {"type": "integer", "minimum": 1, "maximum": 10},
+        "form_gameweeks": {"type": "integer", "minimum": 1, "maximum": 10},
         "limit": {"type": "integer", "minimum": 1, "maximum": 15},
         "max_price": {"type": ["number", "null"], "minimum": 3, "maximum": 20},
         "needs_clarification": {"type": "boolean"},
@@ -123,6 +126,7 @@ QUERY_PLAN_SCHEMA = {
         "metric",
         "scope",
         "gameweeks",
+        "form_gameweeks",
         "limit",
         "max_price",
         "needs_clarification",
@@ -186,6 +190,7 @@ def _plan_from_routed_question(question):
             "fpl_picks": "fpl_pick_research",
         }.get(intent, "unknown"),
         "gameweeks": arguments.get("gameweeks", arguments.get("horizon", 5)),
+        "form_gameweeks": arguments.get("form_gameweeks", 3),
         "limit": arguments.get("limit", 10),
         "max_price": arguments.get("max_price"),
         "needs_clarification": False,
@@ -358,6 +363,7 @@ def normalise_query_plan(raw):
         "metric": None if metric == "NONE" else metric,
         "scope": scope,
         "gameweeks": _bounded_int(raw.get("gameweeks"), 1, 10, 5),
+        "form_gameweeks": _bounded_int(raw.get("form_gameweeks"), 1, 10, 3),
         "limit": _bounded_int(raw.get("limit"), 1, 15, 10),
         "max_price": _bounded_price(raw.get("max_price")) if intent == "fpl_picks" else None,
         "needs_clarification": needs_clarification,
