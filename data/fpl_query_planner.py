@@ -148,11 +148,13 @@ _NUMBER_WORDS = {
 
 def normalise_question_text(question):
     """Normalize harmless FPL language variation before intent interpretation."""
-    normalized = str(question or "").casefold()
+    normalized = str(question or "")
     normalized = normalized.replace("’", "'").replace("–", "-").replace("—", "-")
     normalized = re.sub(r"\s+", " ", normalized).strip()
     for word, number in _NUMBER_WORDS.items():
-        normalized = re.sub(r"\b" + word + r"\b", number, normalized)
+        normalized = re.sub(
+            r"\b" + word + r"\b", number, normalized, flags=re.IGNORECASE
+        )
     normalized = re.sub(r"\bgame[\s-]*weeks?\b", "gameweeks", normalized)
     normalized = re.sub(r"\bgws?\s*(\d{1,2})\b", r"gameweek \1", normalized)
     normalized = re.sub(r"\b(\d{1,2})\s*gws?\b", r"\1 gameweeks", normalized)
@@ -365,15 +367,16 @@ def normalise_query_plan(raw):
 
 def plan_fpl_question(client, model, question, conversation_context=""):
     """Ask OpenAI for a constrained plan, then validate it locally."""
-    deterministic_profile = _deterministic_profile_plan(question)
+    normalized_question = normalise_question_text(question)
+    deterministic_profile = _deterministic_profile_plan(normalized_question)
     if deterministic_profile:
         return deterministic_profile
 
-    deterministic_player_form = _deterministic_player_form_plan(question)
+    deterministic_player_form = _deterministic_player_form_plan(normalized_question)
     if deterministic_player_form:
         return deterministic_player_form
 
-    routed_plan = _plan_from_routed_question(question)
+    routed_plan = _plan_from_routed_question(normalized_question)
     if routed_plan:
         return routed_plan
 
