@@ -110,7 +110,7 @@ def _requested_form_gameweeks(question, default=3):
 def _requested_max_price(question):
     """Extract an FPL price cap expressed in millions, when supplied."""
     match = re.search(
-        r"\b(?:under|below|up to|within)\s*(?:£|\$)?\s*(\d{1,2}(?:\.\d+)?)\s*m?\b",
+        r"\b(?:under|below|up to|within)\s*(?:£|\$)?\s*(\d{1,2}(?:\.\d+)?)\s*(?:m|million)?\b",
         question,
     )
     if not match:
@@ -173,13 +173,17 @@ def route_fpl_question(question):
 
     position = _position_from_question(normalized)
     max_price = _requested_max_price(normalized)
-    asks_for_pick = any(
-        re.search(r"\b" + re.escape(word) + r"\b", normalized)
-        for word in _PICK_WORDS
-    ) or (
-        any(re.search(r"\b" + re.escape(word) + r"\b", normalized)
-            for word in _RANKING_WORDS)
-        and ("next" in normalized or "fixture" in normalized)
+    asks_for_pick = (
+        max_price is not None
+        or any(
+            re.search(r"\b" + re.escape(word) + r"\b", normalized)
+            for word in _PICK_WORDS
+        )
+        or (
+            any(re.search(r"\b" + re.escape(word) + r"\b", normalized)
+                for word in _RANKING_WORDS)
+            and ("next" in normalized or "fixture" in normalized)
+        )
     )
     if position in {"MID", "DEF"} and asks_for_pick:
         horizon = _requested_next_fixture_horizon(normalized)
@@ -195,9 +199,9 @@ def route_fpl_question(question):
                 "limit": _requested_limit(normalized),
             },
             "reason": (
-                "The question asks for transparent, non-personal FPL pick "
-                "candidates using position-specific recent form, fixtures, "
-                "price, and starts eligibility."
+                "The question asks for a transparent, non-personal FPL "
+                "shortlist using position-specific recent form, fixtures, "
+                "price, availability, and starts eligibility."
             ),
         }
 
