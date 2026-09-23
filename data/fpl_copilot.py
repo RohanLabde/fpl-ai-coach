@@ -20,7 +20,6 @@ from data.db import (
     get_team_strength_leaderboard,
     search_fpl_players,
 )
-from data.fpl_intents import route_fpl_question
 from data.fpl_query_planner import normalise_query_plan, plan_fpl_question
 
 try:
@@ -623,8 +622,8 @@ def _answer_routed_question(client, model, question, plan):
     )
 
 
-def _resolve_planned_player(name):
-    """Resolve one explicit player name without silently choosing an ambiguity."""
+def _resolve_planned_player(name, team_hint=None):
+    """Resolve one player while applying an explicit team clarification when given."""
     result = _run_tool(
         "search_fpl_players",
         {"query": name, "position": None, "limit": 8},
@@ -646,14 +645,24 @@ def _resolve_planned_player(name):
         if " ".join(str(row.get("player_name", "")).casefold().split())
         == normalized_name
     ]
-    if len(exact) == 1:
-        return exact[0], result, None
-    if len(rows) == 1:
-        return rows[0], result, None
+    candidates = exact or rows
+    if team_hint:
+        normalized_team = " ".join(team_hint.casefold().split())
+        team_matches = [
+            row for row in candidates
+            if normalized_team in " ".join(
+                str(row.get("team_name", "")).casefold().split()
+            )
+        ]
+        if len(team_matches) == 1:
+            return team_matches[0], result, None
+
+    if len(candidates) == 1:
+        return candidates[0], result, None
 
     choices = ", ".join(
         f"{row.get('player_name')} ({row.get('team_name', 'unknown team')})"
-        for row in rows[:5]
+        for row in candidates[:5]
     )
     return None, result, (
         f"I found several matches for **{name}**: {choices}. "
@@ -661,64 +670,45 @@ def _resolve_planned_player(name):
     )
 
 
-_PROFILE_FOLLOWUP_TERMS = (
-    "price",
-    "ownership",
-    "owned",
-    "availability",
-    "available",
-    "status",
-    "current form",
-    "selected by",
-)
-_FULL_NAME_FOLLOWUP = re.compile(
-    r"^[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'’-]*(?:\s+[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'’-]*)+$"
+_PLAYER_REPLY_PATTERN = re.compile(
+    r"^\s*(?P<name>[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'’-]*(?:\s+[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'’-]*){0,3})"
+    r"(?:\s+(?:from|at|of)\s+(?P<team>[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'’ -]*))?\s*[.?!]*\s*$",
+    re.IGNORECASE,
 )
 
 
-def _pending_player_profile_followup_plan(question, messages):
-    """Resolve a full-name reply to a previously ambiguous profile lookup."""
-    name = " ".join(str(question).strip().rstrip(".?!").split())
-    if not _FULL_NAME_FOLLOWUP.fullmatch(name):
-        return None
+def _pending_player_followup_plan(question, conversation_state):
+    """Complete an explicit pending player choice without parsing prior prose."""
+    pending = conversation_state.get("pending_player_plan")
+    if not isinstance(pending, dict):
+        return None, None
 
-    previous_messages = messages[:-1] if messages else []
-    last_assistant = next(
-        (
-            message.get("content", "")
-            for message in reversed(previous_messages)
-            if message.get("role") == "assistant"
-        ),
-        "",
-    )
-    if "specify the player's full name or team" not in last_assistant.casefold():
-        return None
+    match = _PLAYER_REPLY_PATTERN.fullmatch(str(question))
+    if not match:
+        return None, None
 
-    prior_question = next(
-        (
-            message.get("content", "")
-            for message in reversed(previous_messages)
-            if message.get("role") == "user"
-        ),
-        "",
-    ).casefold()
-    if not any(term in prior_question for term in _PROFILE_FOLLOWUP_TERMS):
-        return None
+    intent = pending.get("intent")
+    if intent not in {
+        "player_form",
+        "player_profile",
+        "upcoming_fixtures",
+        "compare_players",
+    }:
+        return None, None
 
-    return normalise_query_plan(
-        {
-            "intent": "player_profile",
-            "player_names": [name],
-            "position": "NONE",
-            "metric": "NONE",
-            "scope": "player_research",
-            "gameweeks": 5,
-            "limit": 10,
-            "max_price": None,
-            "needs_clarification": False,
-            "clarification": "",
-        }
-    )
+    names = list(pending.get("player_names") or [])
+    index = int(pending.get("pending_player_index", 0))
+    if not 0 <= index < len(names):
+        return None, None
+
+    raw = dict(pending)
+    names[index] = match.group("name")
+    raw["player_names"] = names
+    raw["needs_clarification"] = False
+    raw["clarification"] = ""
+    raw.pop("pending_player_index", None)
+    return normalise_query_plan(raw), match.group("team")
+
 
 
 def _conversation_context(messages):
@@ -731,10 +721,13 @@ def _conversation_context(messages):
     return "\n".join(lines)[-4_000:]
 
 
-def _answer_planned_question(client, model, question, messages):
+def _answer_planned_question(client, model, question, messages, conversation_state=None):
     """Plan, validate, resolve, then execute only a permitted read-only lookup."""
-    plan = _pending_player_profile_followup_plan(question, messages)
+    conversation_state = conversation_state if isinstance(conversation_state, dict) else {}
+    plan, team_hint = _pending_player_followup_plan(question, conversation_state)
     if plan is None:
+        conversation_state.pop("pending_player_plan", None)
+        team_hint = None
         plan = plan_fpl_question(
             client,
             model,
@@ -800,10 +793,12 @@ def _answer_planned_question(client, model, question, messages):
         "upcoming_fixtures",
     }:
         player, _search_result, message = _resolve_planned_player(
-            plan["player_names"][0]
+            plan["player_names"][0], team_hint=team_hint
         )
         if message:
+            conversation_state["pending_player_plan"] = dict(plan)
             return message, ["search_fpl_players"]
+        conversation_state.pop("pending_player_plan", None)
 
         tool_by_intent = {
             "player_form": "get_player_recent_form",
@@ -820,15 +815,22 @@ def _answer_planned_question(client, model, question, messages):
         sources = ["search_fpl_players", tool_name]
     elif plan["intent"] == "compare_players":
         first, _first_search, first_message = _resolve_planned_player(
-            plan["player_names"][0]
+            plan["player_names"][0], team_hint=team_hint
         )
         if first_message:
+            pending = dict(plan)
+            pending["pending_player_index"] = 0
+            conversation_state["pending_player_plan"] = pending
             return first_message, ["search_fpl_players"]
         second, _second_search, second_message = _resolve_planned_player(
             plan["player_names"][1]
         )
         if second_message:
+            pending = dict(plan)
+            pending["pending_player_index"] = 1
+            conversation_state["pending_player_plan"] = pending
             return second_message, ["search_fpl_players"]
+        conversation_state.pop("pending_player_plan", None)
         result = _run_tool(
             "compare_fpl_players",
             {
@@ -854,8 +856,8 @@ def _answer_planned_question(client, model, question, messages):
     )
 
 
-def answer_fpl_question(messages):
-    """Answer through deterministic routing or a validated structured plan."""
+def answer_fpl_question(messages, conversation_state=None):
+    """Answer through one validated query-plan path and explicit session state."""
     if not copilot_is_configured():
         raise RuntimeError("FPL Copilot has not been configured yet.")
 
@@ -863,12 +865,13 @@ def answer_fpl_question(messages):
     model = _get_secret("FPL_COPILOT_MODEL", DEFAULT_MODEL)
     question = _latest_user_question(messages)
 
-    deterministic_plan = route_fpl_question(question)
-    if deterministic_plan:
-        return _answer_routed_question(
-            client, model, question, deterministic_plan
-        )
-    return _answer_planned_question(client, model, question, messages)
+    return _answer_planned_question(
+        client,
+        model,
+        question,
+        messages,
+        conversation_state=conversation_state,
+    )
 
 
 def _data_freshness_caption():
@@ -918,6 +921,8 @@ def render_fpl_copilot():
 
     if "fpl_copilot_messages" not in st.session_state:
         st.session_state["fpl_copilot_messages"] = []
+    if "fpl_copilot_context" not in st.session_state:
+        st.session_state["fpl_copilot_context"] = {}
 
     if not st.session_state["fpl_copilot_messages"]:
         with st.chat_message("assistant"):
@@ -946,7 +951,8 @@ def render_fpl_copilot():
         with st.spinner("Checking FPL data..."):
             try:
                 answer, sources = answer_fpl_question(
-                    st.session_state["fpl_copilot_messages"]
+                    st.session_state["fpl_copilot_messages"],
+                    conversation_state=st.session_state["fpl_copilot_context"],
                 )
                 st.markdown(answer)
                 if sources:
