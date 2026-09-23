@@ -48,6 +48,24 @@ class QueryPlanContractTests(unittest.TestCase):
                 },
             ),
             (
+                "Who are the top 5 midfielders this season?",
+                {
+                    "intent": "leaderboard",
+                    "position": "MID",
+                    "metric": "points",
+                    "limit": 5,
+                },
+            ),
+            (
+                "Who are the top 5 attacking midfielders this season?",
+                {
+                    "intent": "leaderboard",
+                    "position": "MID",
+                    "metric": "attacking",
+                    "limit": 5,
+                },
+            ),
+            (
                 "Give me the top 5 midfield picks under £8m for the next 3 fixtures",
                 {
                     "intent": "fpl_picks",
