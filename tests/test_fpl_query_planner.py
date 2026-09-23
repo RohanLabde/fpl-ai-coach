@@ -66,7 +66,7 @@ class FplQueryPlanTests(unittest.TestCase):
         self.assertEqual(plan["player_names"], ["Palmer"])
         self.assertFalse(plan["needs_clarification"])
 
-    def test_defender_without_metric_uses_defensive_profile(self):
+    def test_position_without_metric_uses_fpl_points(self):
         plan = normalise_query_plan(
             {
                 "intent": "leaderboard",
@@ -81,8 +81,8 @@ class FplQueryPlanTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual(plan["metric"], "defensive")
-        self.assertEqual(plan["scope"], "defensive_form")
+        self.assertEqual(plan["metric"], "points")
+        self.assertEqual(plan["scope"], "fpl_points")
 
     def test_explicit_metric_is_preserved(self):
         plan = normalise_query_plan(

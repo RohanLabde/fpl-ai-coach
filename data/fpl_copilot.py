@@ -194,10 +194,27 @@ def _fallback_leaderboard_answer(plan, result):
                 f"{starts} starts"
             )
         else:
-            detail = (
-                f"{_format_value(row.get('total_points'), 0)} FPL points; "
-                f"{starts} starts"
-            )
+            detail_parts = [
+                f"{_format_value(row.get('total_points'), 0)} FPL points",
+                f"{starts} starts",
+                f"{_format_value(row.get('minutes'), 0)} minutes",
+            ]
+            if row.get("position") == "GKP":
+                detail_parts.extend(
+                    [
+                        f"{_format_value(row.get('total_clean_sheets'), 0)} clean sheets",
+                        f"{_format_value(row.get('total_saves'), 0)} saves",
+                    ]
+                )
+            else:
+                detail_parts.extend(
+                    [
+                        f"{_format_value(row.get('total_goals'), 0)} goals",
+                        f"{_format_value(row.get('total_assists'), 0)} assists",
+                        f"{_format_value(row.get('total_clean_sheets'), 0)} clean sheets",
+                    ]
+                )
+            detail = "; ".join(detail_parts)
         bonus_detail = f"{_format_value(row.get('total_bonus'), 0)} bonus points"
         lines.append(f"{rank}. **{name}** ({team}) — {detail}; {bonus_detail}")
 

@@ -1299,7 +1299,7 @@ def compare_fpl_players(player_a_id, player_b_id):
 
 
 def get_current_season_leaderboard(
-    metric="points", position=None, limit=10, minimum_starts=2
+    metric="points", position=None, limit=10, minimum_start_rate=0.6
 ):
     """Rank current-season players using transparent, position-aware profiles."""
     metric = metric.lower()
@@ -1313,7 +1313,7 @@ def get_current_season_leaderboard(
         raise ValueError("position must be one of GKP, DEF, MID, or FWD.")
 
     limit = max(1, min(int(limit), 15))
-    minimum_starts = max(0, min(int(minimum_starts), 38))
+    minimum_start_rate = max(0.0, min(float(minimum_start_rate), 1.0))
     profile = _CURRENT_SEASON_RANKINGS[metric]
 
     rows = _read_dataframe(
@@ -1365,9 +1365,13 @@ def get_current_season_leaderboard(
             WHERE (:position IS NULL OR stats.position = :position)
             GROUP BY stats.player_id
         ),
-        ranked AS (
+        eligible AS (
             SELECT
                 *,
+                GREATEST(
+                    1,
+                    CEIL(season_completed_gameweeks * :minimum_start_rate)
+                )::integer AS minimum_starts_required,
                 CASE WHEN fixtures > 0
                     THEN total_clean_sheets * 1.0 / fixtures
                 END AS clean_sheet_rate,
@@ -1399,7 +1403,11 @@ def get_current_season_leaderboard(
                     THEN total_creativity * 90.0 / minutes
                 END AS creativity_per_90
             FROM totals
-            WHERE starts >= LEAST(:minimum_starts, season_completed_gameweeks)
+        ),
+        ranked AS (
+            SELECT *
+            FROM eligible
+            WHERE starts >= minimum_starts_required
         )
         SELECT *
         FROM ranked
@@ -1409,7 +1417,7 @@ def get_current_season_leaderboard(
         {
             "position": position,
             "limit": limit,
-            "minimum_starts": minimum_starts,
+            "minimum_start_rate": minimum_start_rate,
         },
     )
     return {
@@ -1419,7 +1427,10 @@ def get_current_season_leaderboard(
         ),
         "metric": metric,
         "ranking_basis": profile["basis"],
-        "minimum_starts": minimum_starts,
+        "minimum_start_rate": minimum_start_rate,
+        "minimum_starts": (
+            rows.iloc[0]["minimum_starts_required"] if not rows.empty else None
+        ),
         "rows": _records(rows),
     }
 

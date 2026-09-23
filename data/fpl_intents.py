@@ -30,12 +30,12 @@ _EASY_FIXTURE_WORDS = ("easiest", "easy", "best run", "lowest difficulty")
 _TEAM_STRENGTH_WORDS = ("best", "strongest", "top", "leader", "leaders", "rank")
 _PICK_WORDS = ("pick", "picks", "option", "options", "recommend", "value")
 
-# “Top” means FPL performance unless the question explicitly asks for a
-# statistical profile. Defence and goalkeeping retain their specialised defaults.
-# A request for a different explicit metric always overrides the profile.
+# “Top” means FPL performance for every position unless the question explicitly
+# asks for a statistical profile. A request for a different explicit metric
+# always overrides that default.
 _POSITION_DEFAULT_METRICS = {
-    "GKP": "goalkeeping",
-    "DEF": "defensive",
+    "GKP": "points",
+    "DEF": "points",
     "MID": "points",
     "FWD": "points",
 }
@@ -54,9 +54,11 @@ def _ranking_metric(question, position):
     # Explicit user intent always has priority over a positional default.
     if "clean sheet" in question:
         return "clean_sheets"
-    if "defensive contribution" in question or "defensive form" in question:
+    if "defensive form" in question or "defensive defender" in question:
+        return "defensive"
+    if "defensive contribution" in question:
         return "defensive_contribution"
-    if "goalkeeper" in question or "goalkeeping" in question or "keeper" in question:
+    if "goalkeeping form" in question or "keeper form" in question:
         return "goalkeeping"
     if "attacking" in question or "xgi" in question or "expected goal involvement" in question:
         return "attacking"
@@ -64,7 +66,7 @@ def _ranking_metric(question, position):
         return "points"
     if "assist" in question:
         return "assists"
-    if "goal" in question:
+    if re.search(r"\bgoals?\b", question):
         return "goals"
     if "threat" in question:
         return "threat"

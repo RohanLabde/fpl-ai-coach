@@ -43,8 +43,17 @@ class QueryPlanContractTests(unittest.TestCase):
                 {
                     "intent": "leaderboard",
                     "position": "DEF",
-                    "metric": "defensive",
+                    "metric": "points",
                     "limit": 5,
+                },
+            ),
+            (
+                "Who are the best defensive defenders this season?",
+                {
+                    "intent": "leaderboard",
+                    "position": "DEF",
+                    "metric": "defensive",
+                    "limit": 10,
                 },
             ),
             (

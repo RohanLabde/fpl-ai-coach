@@ -75,12 +75,12 @@ Use these intents only:
   cannot be grounded with the currently available data.
 
 Position-aware ranking defaults:
-- DEF + unspecified "best" -> defensive.
-- GKP + unspecified "best" -> goalkeeping.
-- MID or FWD + unspecified "best" -> FPL points.
+- Any position + unspecified "top" or "best" -> FPL points.
 - No position + unspecified "best" -> FPL points.
-Explicit wording such as goals, assists, clean sheets, defensive contribution,
-FPL points, threat, creativity, xGI, or attacking always overrides a default.
+Explicit wording such as defensive form, goalkeeping form, goals, assists,
+clean sheets, defensive contribution, FPL points, threat, creativity, xGI, or
+attacking always overrides a default. For example, "top defenders" means FPL
+points; "best defensive defenders" means the defensive profile.
 
 Use current_season for player rankings. Use team_fixture_horizon for questions
 such as "which team has the easiest next five fixtures"; set gameweeks to that
@@ -202,12 +202,7 @@ def _plan_from_routed_question(question):
 
 
 def _default_metric(position):
-    return {
-        "DEF": "defensive",
-        "GKP": "goalkeeping",
-        "MID": "points",
-        "FWD": "points",
-    }.get(position, "points")
+    return "points"
 
 
 def _clean_player_names(names):

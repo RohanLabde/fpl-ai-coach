@@ -17,20 +17,28 @@ class FplIntentRouterTests(unittest.TestCase):
             {"metric": "attacking", "position": "MID", "limit": 10},
         )
 
-    def test_current_season_defender_leaderboard_uses_defensive_profile(self):
+    def test_current_season_defender_leaderboard_uses_fpl_points(self):
         plan = route_fpl_question("Who are the best defenders this season?")
 
         self.assertEqual(
             plan["arguments"],
-            {"metric": "defensive", "position": "DEF", "limit": 10},
+            {"metric": "points", "position": "DEF", "limit": 10},
         )
 
-    def test_current_season_goalkeeper_leaderboard_uses_goalkeeping_profile(self):
+    def test_current_season_goalkeeper_leaderboard_uses_fpl_points(self):
         plan = route_fpl_question("Who are the best goalkeepers this season?")
 
         self.assertEqual(
             plan["arguments"],
-            {"metric": "goalkeeping", "position": "GKP", "limit": 10},
+            {"metric": "points", "position": "GKP", "limit": 10},
+        )
+
+    def test_explicit_defensive_profile_overrides_fpl_points_default(self):
+        plan = route_fpl_question("Who are the best defensive defenders this season?")
+
+        self.assertEqual(
+            plan["arguments"],
+            {"metric": "defensive", "position": "DEF", "limit": 10},
         )
 
     def test_explicit_metric_and_limit_override_position_default(self):
