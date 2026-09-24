@@ -346,17 +346,22 @@ def _form_deduction_summary(row):
 
 
 def _fallback_player_form_answer(result):
-    """Render gameweek form with the event detail behind official FPL totals."""
+    """Render finalized form at the requested gameweek or fixture grain."""
     rows = result.get("rows", [])
     if not rows:
         return "I could not find finalized recent form data for that player."
 
     name = rows[0].get("player_name") or "This player"
     source = result.get("source")
+    is_match_window = result.get("window") == "matches"
     lines = [
         f"**Recent FPL form — {name}**",
-        "Each total is the official FPL score. The detail below shows the "
-        "recorded scoring events behind it.",
+        (
+            "Each row is one finalized match and its official FPL score."
+            if is_match_window
+            else "Each total is the official FPL score. The detail below shows the "
+            "recorded scoring events behind it."
+        ),
     ]
     if source:
         lines.append(f"Source: {source}.")
@@ -366,11 +371,20 @@ def _fallback_player_form_answer(result):
         gameweek = _format_value(row.get("gameweek"), 0)
         total_points = _format_value(row.get("total_points"), 0)
         minutes = _format_value(row.get("minutes"), 0)
-        starts = _format_value(row.get("starts"), 0)
+        starts = row.get("starts")
+        fixture_label = f"GW {gameweek}"
+        if is_match_window:
+            opponent = row.get("opponent_team_name") or "opponent unknown"
+            venue = "H" if row.get("was_home") else "A"
+            fixture_label = f"GW {gameweek} vs {opponent} ({venue})"
         lines.extend(
             [
-                f"**GW {gameweek} — {total_points} FPL points**",
-                f"- Playing time: {minutes} minutes; {starts} starts",
+                f"**{fixture_label} — {total_points} FPL points**",
+                (
+                    f"- Playing time: {minutes} minutes; {starts} starts"
+                    if starts is not None
+                    else f"- Playing time: {minutes} minutes"
+                ),
                 (
                     "- Attacking events: "
                     f"{_format_value(row.get('goals_scored'), 0)} goals, "
@@ -397,11 +411,22 @@ def _fallback_player_form_answer(result):
             ]
         )
 
-    lines.append(
-        "Note: completed-gameweek rows may combine multiple fixtures in a double "
-        "gameweek, so the app shows the official total plus its recorded events "
-        "rather than reconstructing an unreliable component-point sum."
-    )
+    if is_match_window:
+        lines.append(
+            "Note: this is a match window, so each fixture is shown separately, "
+            "including both fixtures in a double gameweek."
+        )
+        if any(row.get("starts") is None for row in rows):
+            lines.append(
+                "FPL does not supply a start flag at fixture grain; the listed "
+                "minutes and scoring events remain fixture-specific."
+            )
+    else:
+        lines.append(
+            "Note: completed-gameweek rows may combine multiple fixtures in a double "
+            "gameweek, so the app shows the official total plus its recorded events "
+            "rather than reconstructing an unreliable component-point sum."
+        )
     return "\n".join(lines)
 
 
@@ -862,6 +887,7 @@ def _answer_planned_question(client, model, question, messages, conversation_sta
         arguments = {"player_id": int(player["player_id"])}
         if tool_name == "get_player_recent_form":
             arguments["gameweeks"] = plan["gameweeks"]
+            arguments["window"] = plan["form_window"]
         if tool_name == "get_player_upcoming_fixtures":
             arguments["limit"] = min(plan["limit"], 8)
         result = _run_tool(tool_name, arguments)

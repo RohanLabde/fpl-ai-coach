@@ -86,8 +86,11 @@ Use current_season for player rankings. Use team_fixture_horizon for questions
 such as "which team has the easiest next five fixtures"; set gameweeks to that
 fixture horizon. Use team_strength for "best attacks" or "best defences"; use
 attacking or defensive as the metric and gameweeks as the recent form window.
-Use recent_form for questions about a player's last N gameweeks, defaulting to
-5. Include only names that are explicitly
+Use player_form for questions about a player's last N gameweeks, defaulting to
+5. Set form_window to gameweeks unless the user explicitly asks for matches or
+fixtures; then set form_window to matches. A match window must return separate
+fixture rows, including both fixtures in a double gameweek. Include only names
+that are explicitly
 present in the question or clearly resolved from the supplied conversation
 context. Return unsupported rather than guessing a player or claiming the app
 can see the user's FPL team.
@@ -115,6 +118,7 @@ QUERY_PLAN_SCHEMA = {
         "scope": {"type": "string", "enum": sorted(_ALLOWED_SCOPES)},
         "gameweeks": {"type": "integer", "minimum": 1, "maximum": 10},
         "form_gameweeks": {"type": "integer", "minimum": 1, "maximum": 10},
+        "form_window": {"type": "string", "enum": ["gameweeks", "matches"]},
         "limit": {"type": "integer", "minimum": 1, "maximum": 15},
         "max_price": {"type": ["number", "null"], "minimum": 3, "maximum": 20},
         "needs_clarification": {"type": "boolean"},
@@ -128,6 +132,7 @@ QUERY_PLAN_SCHEMA = {
         "scope",
         "gameweeks",
         "form_gameweeks",
+        "form_window",
         "limit",
         "max_price",
         "needs_clarification",
@@ -192,6 +197,7 @@ def _plan_from_routed_question(question):
         }.get(intent, "unknown"),
         "gameweeks": arguments.get("gameweeks", arguments.get("horizon", 5)),
         "form_gameweeks": arguments.get("form_gameweeks", 3),
+        "form_window": "gameweeks",
         "limit": arguments.get("limit", 10),
         "max_price": arguments.get("max_price"),
         "needs_clarification": False,
@@ -274,7 +280,7 @@ _PLAYER_FORM_PATTERN = re.compile(
     r"(?P<name>[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'’-]*(?:\s+[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'’-]*){0,3})"
     r"\s+performed"
     r"(?:\s+(?:(?:over|in|during)\s+)?(?:the\s+)?(?:last|recent)\s+"
-    r"(?P<gameweeks>\d{1,2})\s+game\s*weeks?)?\s*[?!.]*\s*$",
+    r"(?P<gameweeks>\d{1,2})\s+(?P<window>game\s*weeks?|matches?))?\s*[?!.]*\s*$",
     re.IGNORECASE,
 )
 
@@ -293,6 +299,11 @@ def _deterministic_player_form_plan(question):
             "metric": "NONE",
             "scope": "performance",
             "gameweeks": match.group("gameweeks") or 5,
+            "form_window": (
+                "matches"
+                if (match.group("window") or "").lower().startswith("match")
+                else "gameweeks"
+            ),
             "limit": 10,
             "max_price": None,
             "needs_clarification": False,
@@ -363,6 +374,11 @@ def normalise_query_plan(raw):
         "scope": scope,
         "gameweeks": _bounded_int(raw.get("gameweeks"), 1, 10, 5),
         "form_gameweeks": _bounded_int(raw.get("form_gameweeks"), 1, 10, 3),
+        "form_window": (
+            raw.get("form_window")
+            if raw.get("form_window") in {"gameweeks", "matches"}
+            else "gameweeks"
+        ),
         "limit": _bounded_int(raw.get("limit"), 1, 15, 10),
         "max_price": _bounded_price(raw.get("max_price")) if intent == "fpl_picks" else None,
         "needs_clarification": needs_clarification,

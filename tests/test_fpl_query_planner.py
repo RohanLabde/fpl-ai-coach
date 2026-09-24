@@ -55,6 +55,18 @@ class FplQueryPlanTests(unittest.TestCase):
                 self.assertEqual(plan["gameweeks"], 3)
                 self.assertFalse(plan["needs_clarification"])
 
+    def test_match_window_is_not_treated_as_a_gameweek_window(self):
+        plan = plan_fpl_question(
+            None,
+            None,
+            "How has Saka performed in the last 5 matches?",
+        )
+
+        self.assertEqual(plan["intent"], "player_form")
+        self.assertEqual(plan["player_names"], ["Saka"])
+        self.assertEqual(plan["gameweeks"], 5)
+        self.assertEqual(plan["form_window"], "matches")
+
     def test_possessive_profile_question_bypasses_model_planner(self):
         plan = plan_fpl_question(
             None,

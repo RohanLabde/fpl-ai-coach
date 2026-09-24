@@ -925,9 +925,70 @@ def search_fpl_players(query, position=None, limit=8):
     }
 
 
-def get_player_recent_form(player_id, gameweeks=5):
-    """Return recent finalized FPL form, preferring completed-GW totals."""
+def get_player_recent_form(player_id, gameweeks=5, window="gameweeks"):
+    """Return finalized player form by gameweek totals or individual matches."""
     gameweeks = max(1, min(int(gameweeks), 10))
+    window = window if window in {"gameweeks", "matches"} else "gameweeks"
+
+    if window == "matches":
+        rows = _read_dataframe(
+            """
+            SELECT
+                history.season,
+                history.gameweek,
+                history.fixture_id,
+                fixtures.kickoff_time,
+                history.player_name,
+                history.position,
+                COALESCE(history.team_name, history.team) AS team_name,
+                history.opponent_team_id,
+                CASE
+                    WHEN history.was_home THEN fixtures.away_team_name
+                    ELSE fixtures.home_team_name
+                END AS opponent_team_name,
+                history.was_home,
+                1 AS fixture_count,
+                history.minutes,
+                history.starts,
+                history.total_points,
+                history.goals_scored,
+                history.assists,
+                history.clean_sheets,
+                history.goals_conceded,
+                history.own_goals,
+                history.penalties_saved,
+                history.penalties_missed,
+                history.saves,
+                history.yellow_cards,
+                history.red_cards,
+                history.bonus,
+                history.bps,
+                history.defensive_contribution,
+                history.expected_goals,
+                history.expected_assists,
+                history.expected_goal_involvements,
+                history.creativity,
+                history.threat,
+                'completed_fixture' AS data_grain
+            FROM public.player_gameweek AS history
+            JOIN public.fpl_fixtures AS fixtures
+              ON fixtures.fixture_id = history.fixture_id
+            WHERE history.player_id = :player_id
+              AND fixtures.finished IS TRUE
+            ORDER BY fixtures.kickoff_time DESC NULLS LAST,
+                     history.season DESC,
+                     history.gameweek DESC,
+                     history.fixture_id DESC
+            LIMIT :limit
+            """,
+            {"player_id": int(player_id), "limit": gameweeks},
+        )
+        return {
+            "source": "finalized fixture-level FPL data",
+            "window": "matches",
+            "rows": _records(rows),
+        }
+
     rows = _read_dataframe(
         """
         WITH completed_gameweeks AS (
@@ -1025,6 +1086,7 @@ def get_player_recent_form(player_id, gameweeks=5):
             "completed-gameweek totals where available; otherwise "
             "historical fixture-level data"
         ),
+        "window": "gameweeks",
         "rows": _records(rows),
     }
 

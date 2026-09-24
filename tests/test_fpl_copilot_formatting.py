@@ -80,6 +80,49 @@ class PlayerAnswerFormatTests(unittest.TestCase):
         self.assertIn("3 bonus points; 38 BPS", answer)
         self.assertIn("deductions: none recorded", answer)
 
+    def test_recent_match_form_labels_fixture_and_venue(self):
+        answer = _fallback_player_form_answer(
+            {
+                "window": "matches",
+                "rows": [
+                    {
+                        "player_name": "Bukayo Saka",
+                        "gameweek": 5,
+                        "opponent_team_name": "Man City",
+                        "was_home": True,
+                        "total_points": 8,
+                        "minutes": 90,
+                        "starts": 1,
+                    }
+                ],
+            }
+        )
+
+        self.assertIn("**GW 5 vs Man City (H) — 8 FPL points**", answer)
+        self.assertIn("each fixture is shown separately", answer)
+
+    def test_recent_match_form_does_not_invent_starts(self):
+        answer = _fallback_player_form_answer(
+            {
+                "window": "matches",
+                "rows": [
+                    {
+                        "player_name": "Bukayo Saka",
+                        "gameweek": 5,
+                        "opponent_team_name": "Man City",
+                        "was_home": False,
+                        "total_points": 2,
+                        "minutes": 80,
+                        "starts": None,
+                    }
+                ],
+            }
+        )
+
+        self.assertIn("Playing time: 80 minutes", answer)
+        self.assertNotIn("0 starts", answer)
+        self.assertIn("does not supply a start flag", answer)
+
     def test_profile_renders_live_fields_and_availability(self):
         answer = _fallback_player_profile_answer(
             {
