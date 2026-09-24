@@ -933,6 +933,10 @@ def get_player_recent_form(player_id, gameweeks=5, window="gameweeks"):
     if window == "matches":
         rows = _read_dataframe(
             """
+            WITH latest_season AS (
+                SELECT MAX(season) AS season
+                FROM public.fpl_completed_gameweek_stats
+            )
             SELECT
                 history.season,
                 history.gameweek,
@@ -973,6 +977,8 @@ def get_player_recent_form(player_id, gameweeks=5, window="gameweeks"):
             FROM public.player_gameweek AS history
             JOIN public.fpl_fixtures AS fixtures
               ON fixtures.fixture_id = history.fixture_id
+            INNER JOIN latest_season
+              ON history.season = latest_season.season
             WHERE history.player_id = :player_id
               AND fixtures.finished IS TRUE
             ORDER BY fixtures.kickoff_time DESC NULLS LAST,
@@ -991,9 +997,13 @@ def get_player_recent_form(player_id, gameweeks=5, window="gameweeks"):
 
     rows = _read_dataframe(
         """
-        WITH completed_gameweeks AS (
+        WITH latest_season AS (
+            SELECT MAX(season) AS season
+            FROM public.fpl_completed_gameweek_stats
+        ),
+        completed_gameweeks AS (
             SELECT
-                season,
+                fpl_completed_gameweek_stats.season AS season,
                 gameweek,
                 player_name,
                 position,
@@ -1025,6 +1035,8 @@ def get_player_recent_form(player_id, gameweeks=5, window="gameweeks"):
                 defensive_contribution,
                 'completed_gameweek_total' AS data_grain
             FROM public.fpl_completed_gameweek_stats
+            INNER JOIN latest_season
+                ON fpl_completed_gameweek_stats.season = latest_season.season
             WHERE player_id = :player_id
         ),
         fixture_history AS (
@@ -1061,6 +1073,8 @@ def get_player_recent_form(player_id, gameweeks=5, window="gameweeks"):
                 history.defensive_contribution,
                 'historical_fixture' AS data_grain
             FROM public.player_gameweek AS history
+            INNER JOIN latest_season
+                ON history.season = latest_season.season
             WHERE history.player_id = :player_id
               AND NOT EXISTS (
                   SELECT 1
@@ -1082,10 +1096,7 @@ def get_player_recent_form(player_id, gameweeks=5, window="gameweeks"):
         {"player_id": int(player_id), "limit": gameweeks},
     )
     return {
-        "source": (
-            "completed-gameweek totals where available; otherwise "
-            "historical fixture-level data"
-        ),
+        "source": "finalized current-season gameweek totals",
         "window": "gameweeks",
         "rows": _records(rows),
     }

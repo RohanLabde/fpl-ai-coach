@@ -372,6 +372,7 @@ def _fallback_player_form_answer(result):
         total_points = _format_value(row.get("total_points"), 0)
         minutes = _format_value(row.get("minutes"), 0)
         starts = row.get("starts")
+        formatted_starts = _format_value(starts, 0) if starts is not None else None
         fixture_label = f"GW {gameweek}"
         if is_match_window:
             opponent = row.get("opponent_team_name") or "opponent unknown"
@@ -381,8 +382,8 @@ def _fallback_player_form_answer(result):
             [
                 f"**{fixture_label} — {total_points} FPL points**",
                 (
-                    f"- Playing time: {minutes} minutes; {starts} starts"
-                    if starts is not None
+                    f"- Playing time: {minutes} minutes; {formatted_starts} starts"
+                    if formatted_starts is not None
                     else f"- Playing time: {minutes} minutes"
                 ),
                 (

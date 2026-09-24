@@ -99,6 +99,7 @@ class PlayerAnswerFormatTests(unittest.TestCase):
         )
 
         self.assertIn("**GW 5 vs Man City (H) — 8 FPL points**", answer)
+        self.assertIn("Playing time: 90 minutes; 1 starts", answer)
         self.assertIn("each fixture is shown separately", answer)
 
     def test_recent_match_form_does_not_invent_starts(self):
