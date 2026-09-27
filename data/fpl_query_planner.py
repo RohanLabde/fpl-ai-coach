@@ -66,7 +66,7 @@ Use these intents only:
 - player_profile: current price, availability, ownership, team, or status for
   one named player.
 - upcoming_fixtures: future fixtures for one named player.
-- compare_players: comparison of exactly two named players.
+- compare_players: comparison of two to four explicitly named players.
 - team_fixture_horizon: rank all teams by the difficulty of their next N fixtures.
 - team_strength: rank teams by recent attacking or defensive form.
 - fpl_picks: transparent, non-personal MID or DEF candidate ranking using
@@ -111,7 +111,7 @@ QUERY_PLAN_SCHEMA = {
         "player_names": {
             "type": "array",
             "items": {"type": "string"},
-            "maxItems": 2,
+            "maxItems": 4,
         },
         "position": {"type": "string", "enum": sorted(_ALLOWED_POSITIONS)},
         "metric": {"type": "string", "enum": sorted(_ALLOWED_METRICS)},
@@ -217,7 +217,7 @@ def _clean_player_names(names):
         text = re.sub(r"\s+", " ", str(name)).strip()
         if text and text not in cleaned:
             cleaned.append(text)
-    return cleaned[:2]
+    return cleaned[:4]
 
 
 def _bounded_int(value, lower, upper, default):
@@ -312,6 +312,43 @@ def _deterministic_player_form_plan(question):
     )
 
 
+_COMPARE_PLAYERS_PATTERN = re.compile(
+    r"^\s*(?:compare|comparison\s+of)\s+(?P<names>.+?)"
+    r"(?:\s+(?:for|in|over)\s+(?:the\s+)?current\s+season)?\s*[?!.]*\s*$",
+    re.IGNORECASE,
+)
+
+
+def _deterministic_comparison_plan(question):
+    """Route simple two-to-four player comparisons without model variation."""
+    match = _COMPARE_PLAYERS_PATTERN.match(str(question))
+    if not match:
+        return None
+
+    names = [
+        part.strip()
+        for part in re.split(r"\s*,\s*|\s+(?:and|&)\s+", match.group("names"))
+        if part.strip()
+    ]
+    if not 2 <= len(names) <= 4:
+        return None
+
+    return normalise_query_plan(
+        {
+            "intent": "compare_players",
+            "player_names": names,
+            "position": "NONE",
+            "metric": "NONE",
+            "scope": "player_research",
+            "gameweeks": 5,
+            "limit": 10,
+            "max_price": None,
+            "needs_clarification": False,
+            "clarification": "",
+        }
+    )
+
+
 def normalise_query_plan(raw):
     """Validate a model plan and apply safe, position-aware defaults."""
     raw = raw if isinstance(raw, dict) else {}
@@ -396,6 +433,10 @@ def plan_fpl_question(client, model, question, conversation_context=""):
     deterministic_player_form = _deterministic_player_form_plan(normalized_question)
     if deterministic_player_form:
         return deterministic_player_form
+
+    deterministic_comparison = _deterministic_comparison_plan(normalized_question)
+    if deterministic_comparison:
+        return deterministic_comparison
 
     routed_plan = _plan_from_routed_question(normalized_question)
     if routed_plan:

@@ -469,7 +469,8 @@ def _fallback_player_comparison_answer(result):
                 f"- Price: {_format_value(row.get('price'))}; "
                 f"availability: {_availability_summary(row)}",
                 f"- Finalized season: {_format_value(row.get('season_points'), 0)} "
-                f"points, {_format_value(row.get('season_minutes'), 0)} minutes; "
+                f"points, {_format_value(row.get('season_starts'), 0)} starts, "
+                f"{_format_value(row.get('season_minutes'), 0)} minutes; "
                 f"{_format_value(row.get('season_bonus'), 0)} bonus points "
                 f"({_format_value(row.get('season_bonus_per_90'))} per 90); "
                 f"{_format_value(row.get('season_bps'), 0)} BPS",
@@ -495,6 +496,9 @@ def _fallback_player_comparison_answer(result):
                 f"{_format_value(row.get('season_xgi'))} xGI "
                 f"({_format_value(row.get('season_xgi_per_90'))} per 90)"
             )
+        news = str(row.get("news") or "").strip()
+        if news:
+            lines.append(f"- Availability note: {news}")
         lines.append("")
 
     return "\n".join(lines).rstrip()
@@ -921,29 +925,21 @@ def _answer_planned_question(client, model, question, messages, conversation_sta
         result = _run_tool(tool_name, arguments)
         sources = ["search_fpl_players", tool_name]
     elif plan["intent"] == "compare_players":
-        first, _first_search, first_message = _resolve_planned_player(
-            plan["player_names"][0], team_hint=team_hint
-        )
-        if first_message:
-            pending = dict(plan)
-            pending["pending_player_index"] = 0
-            conversation_state["pending_player_plan"] = pending
-            return first_message, ["search_fpl_players"]
-        second, _second_search, second_message = _resolve_planned_player(
-            plan["player_names"][1]
-        )
-        if second_message:
-            pending = dict(plan)
-            pending["pending_player_index"] = 1
-            conversation_state["pending_player_plan"] = pending
-            return second_message, ["search_fpl_players"]
+        players = []
+        for index, player_name in enumerate(plan["player_names"]):
+            player, _search, message = _resolve_planned_player(
+                player_name, team_hint=team_hint if index == 0 else None
+            )
+            if message:
+                pending = dict(plan)
+                pending["pending_player_index"] = index
+                conversation_state["pending_player_plan"] = pending
+                return message, ["search_fpl_players"]
+            players.append(player)
         conversation_state.pop("pending_player_plan", None)
         result = _run_tool(
             "compare_fpl_players",
-            {
-                "player_a_id": int(first["player_id"]),
-                "player_b_id": int(second["player_id"]),
-            },
+            {"player_ids": [int(player["player_id"]) for player in players]},
         )
         sources = ["search_fpl_players", "compare_fpl_players"]
     else:

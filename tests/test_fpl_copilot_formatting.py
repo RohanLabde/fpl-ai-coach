@@ -202,6 +202,72 @@ class PlayerAnswerFormatTests(unittest.TestCase):
         self.assertIn("3 bonus points (1 per 90); 60 BPS", answer)
         self.assertNotIn("Attacking output", answer)
 
+    def test_comparison_renders_mixed_positions_with_common_and_specific_metrics(self):
+        answer = _fallback_player_comparison_answer(
+            {
+                "rows": [
+                    {
+                        "player_name": "Goalkeeper One",
+                        "team_name": "Arsenal",
+                        "position": "GKP",
+                        "price": 5.5,
+                        "status": "a",
+                        "season_points": 30,
+                        "season_starts": 5,
+                        "season_minutes": 450,
+                        "season_clean_sheets": 3,
+                        "season_saves_per_90": 2.4,
+                        "season_bonus": 4,
+                        "season_bonus_per_90": 0.8,
+                        "season_bps": 90,
+                    },
+                    {
+                        "player_name": "Defender One",
+                        "team_name": "Chelsea",
+                        "position": "DEF",
+                        "price": 5.0,
+                        "status": "a",
+                        "season_points": 28,
+                        "season_starts": 5,
+                        "season_minutes": 430,
+                        "season_clean_sheets": 2,
+                        "season_defensive_contribution_per_90": 4.6,
+                        "season_bonus": 2,
+                        "season_bonus_per_90": 0.4,
+                        "season_bps": 70,
+                    },
+                    {
+                        "player_name": "Midfielder One",
+                        "team_name": "Liverpool",
+                        "position": "MID",
+                        "price": 8.0,
+                        "status": "d",
+                        "chance_of_playing_next_round": 75,
+                        "news": "Knock being assessed",
+                        "season_points": 42,
+                        "season_starts": 5,
+                        "season_minutes": 420,
+                        "season_goals": 3,
+                        "season_assists": 2,
+                        "season_xgi": 4.5,
+                        "season_xgi_per_90": 1.0,
+                        "season_bonus": 5,
+                        "season_bonus_per_90": 1.1,
+                        "season_bps": 100,
+                    },
+                ]
+            }
+        )
+
+        self.assertIn("**Goalkeeper One** — GKP, Arsenal", answer)
+        self.assertIn("saves per 90", answer)
+        self.assertIn("**Defender One** — DEF, Chelsea", answer)
+        self.assertIn("defensive contribution per 90", answer)
+        self.assertIn("**Midfielder One** — MID, Liverpool", answer)
+        self.assertIn("Attacking output", answer)
+        self.assertIn("5 starts", answer)
+        self.assertIn("Availability note: Knock being assessed", answer)
+
 
 if __name__ == "__main__":
     unittest.main()

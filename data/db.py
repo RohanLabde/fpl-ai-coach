@@ -1271,15 +1271,27 @@ _CURRENT_SEASON_RANKINGS = {
 }
 
 
-def compare_fpl_players(player_a_id, player_b_id):
-    """Return one comparable live and current-season row for each player."""
-    player_a_id = int(player_a_id)
-    player_b_id = int(player_b_id)
-    if player_a_id == player_b_id:
-        raise ValueError("Choose two different FPL players to compare.")
+def compare_fpl_players(player_ids):
+    """Return comparable live and current-season rows for two to four players."""
+    if not isinstance(player_ids, (list, tuple, set)):
+        raise ValueError("player_ids must contain two to four FPL player IDs.")
+
+    ids = []
+    for player_id in player_ids:
+        value = int(player_id)
+        if value not in ids:
+            ids.append(value)
+    if not 2 <= len(ids) <= 4:
+        raise ValueError("Choose between two and four different FPL players to compare.")
+
+    parameters = {
+        f"player_{index}_id": player_id for index, player_id in enumerate(ids)
+    }
+    id_placeholders = ", ".join(f":player_{index}_id" for index in range(len(ids)))
+    player_order = ", ".join(str(player_id) for player_id in ids)
 
     rows = _read_dataframe(
-        """
+        f"""
         WITH latest_live_snapshot AS (
             SELECT MAX(snapshot_at) AS snapshot_at
             FROM public.fpl_live_player_snapshots
@@ -1292,6 +1304,7 @@ def compare_fpl_players(player_a_id, player_b_id):
             SELECT
                 player_id,
                 SUM(COALESCE(minutes, 0)) AS season_minutes,
+                SUM(COALESCE(starts, 0)) AS season_starts,
                 SUM(COALESCE(total_points, 0)) AS season_points,
                 SUM(COALESCE(goals_scored, 0)) AS season_goals,
                 SUM(COALESCE(assists, 0)) AS season_assists,
@@ -1305,7 +1318,7 @@ def compare_fpl_players(player_a_id, player_b_id):
             FROM public.fpl_completed_gameweek_stats
             INNER JOIN latest_season
                 ON fpl_completed_gameweek_stats.season = latest_season.season
-            WHERE player_id IN (:player_a_id, :player_b_id)
+            WHERE player_id IN ({id_placeholders})
             GROUP BY player_id
         )
         SELECT
@@ -1318,8 +1331,10 @@ def compare_fpl_players(player_a_id, player_b_id):
             live.status,
             live.chance_of_playing_next_round,
             live.selected_by_percent,
+            live.news,
             live.snapshot_at,
             COALESCE(totals.season_minutes, 0) AS season_minutes,
+            COALESCE(totals.season_starts, 0) AS season_starts,
             COALESCE(totals.season_points, 0) AS season_points,
             COALESCE(totals.season_goals, 0) AS season_goals,
             COALESCE(totals.season_assists, 0) AS season_assists,
@@ -1357,10 +1372,10 @@ def compare_fpl_players(player_a_id, player_b_id):
             ON live.snapshot_at = latest_live_snapshot.snapshot_at
         LEFT JOIN season_totals AS totals
             ON totals.player_id = live.player_id
-        WHERE live.player_id IN (:player_a_id, :player_b_id)
-        ORDER BY live.player_id
+        WHERE live.player_id IN ({id_placeholders})
+        ORDER BY array_position(ARRAY[{player_order}]::integer[], live.player_id)
         """,
-        {"player_a_id": player_a_id, "player_b_id": player_b_id},
+        parameters,
     )
     return {
         "source": (

@@ -159,6 +159,32 @@ class FplQueryPlanTests(unittest.TestCase):
         self.assertEqual(plan["intent"], "unsupported")
         self.assertTrue(plan["needs_clarification"])
 
+    def test_comparison_supports_up_to_four_explicit_players(self):
+        plan = plan_fpl_question(
+            None,
+            None,
+            "Compare Mbeumo, Palmer and Saka for the current season",
+        )
+
+        self.assertEqual(plan["intent"], "compare_players")
+        self.assertEqual(plan["player_names"], ["Mbeumo", "Palmer", "Saka"])
+        self.assertFalse(plan["needs_clarification"])
+
+        four_player_plan = normalise_query_plan(
+            {
+                "intent": "compare_players",
+                "player_names": ["Raya", "Gabriel", "Saka", "Haaland"],
+                "position": "NONE",
+                "metric": "NONE",
+                "scope": "player_research",
+                "gameweeks": 5,
+                "limit": 10,
+                "needs_clarification": False,
+                "clarification": "",
+            }
+        )
+        self.assertEqual(len(four_player_plan["player_names"]), 4)
+
     def test_bounds_and_duplicate_names_are_normalised(self):
         plan = normalise_query_plan(
             {
