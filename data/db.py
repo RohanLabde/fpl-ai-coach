@@ -875,12 +875,19 @@ def search_fpl_players(query, position=None, limit=8):
     limit = max(1, min(int(limit), 10))
     params = {
         "name_pattern": f"%{normalized_query}%",
-        "position": position,
         "limit": limit,
     }
+    # Do not bind a nullable parameter into ``:value IS NULL OR ...``.
+    # Psycopg uses prepared statements and PostgreSQL cannot infer the type of
+    # that standalone NULL.  Compose the optional predicate instead, so an
+    # omitted filter is genuinely absent from the query.
+    live_position_filter = "AND live.position = :position" if position else ""
+    historical_position_filter = "AND position = :position" if position else ""
+    if position:
+        params["position"] = position
 
     live_rows = _read_dataframe(
-        """
+        f"""
         WITH latest_live_snapshot AS (
             SELECT MAX(snapshot_at) AS snapshot_at
             FROM public.fpl_live_player_snapshots
@@ -908,7 +915,7 @@ def search_fpl_players(query, position=None, limit=8):
                 (live.first_name || ' ' || live.second_name) ILIKE :name_pattern
                 OR live.web_name ILIKE :name_pattern
             )
-          AND (:position IS NULL OR live.position = :position)
+          {live_position_filter}
         ORDER BY live.total_points DESC NULLS LAST, live.form DESC NULLS LAST
         LIMIT :limit
         """,
@@ -921,7 +928,7 @@ def search_fpl_players(query, position=None, limit=8):
         }
 
     historical_rows = _read_dataframe(
-        """
+        f"""
         WITH latest_player_rows AS (
             SELECT DISTINCT ON (player_id)
                 player_id,
@@ -932,7 +939,7 @@ def search_fpl_players(query, position=None, limit=8):
                 gameweek AS latest_historical_gameweek
             FROM public.player_gameweek
             WHERE player_name ILIKE :name_pattern
-              AND (:position IS NULL OR position = :position)
+              {historical_position_filter}
             ORDER BY player_id, season DESC, gameweek DESC, fixture_id DESC
         )
         SELECT *
@@ -1179,6 +1186,11 @@ def get_form_leaderboard(metric="points", position=None, limit=10):
 
     limit = max(1, min(int(limit), 15))
     metric_column = _FORM_METRICS[metric]
+    position_filter = "WHERE pf.position = :position" if position else ""
+    parameters = {"limit": limit}
+    if position:
+        parameters["position"] = position
+
     rows = _read_dataframe(
         f"""
         WITH latest_snapshot AS (
@@ -1205,11 +1217,11 @@ def get_form_leaderboard(metric="points", position=None, limit=10):
         INNER JOIN latest_snapshot latest
             ON pf.season = latest.season
            AND pf.gameweek = latest.gameweek
-        WHERE (:position IS NULL OR pf.position = :position)
+        {position_filter}
         ORDER BY pf.{metric_column} DESC NULLS LAST, pf.player_name
         LIMIT :limit
         """,
-        {"position": position, "limit": limit},
+        parameters,
     )
     return {
         "source": (
@@ -1431,6 +1443,13 @@ def get_current_season_leaderboard(
     limit = max(1, min(int(limit), 15))
     minimum_start_rate = max(0.0, min(float(minimum_start_rate), 1.0))
     profile = _CURRENT_SEASON_RANKINGS[metric]
+    position_filter = "WHERE stats.position = :position" if position else ""
+    parameters = {
+        "limit": limit,
+        "minimum_start_rate": minimum_start_rate,
+    }
+    if position:
+        parameters["position"] = position
 
     rows = _read_dataframe(
         f"""
@@ -1486,7 +1505,7 @@ def get_current_season_leaderboard(
                 ON stats.season = latest_season.season
             INNER JOIN season_context
                 ON stats.season = season_context.season
-            WHERE (:position IS NULL OR stats.position = :position)
+            {position_filter}
             GROUP BY stats.player_id
         ),
         eligible AS (
@@ -1545,11 +1564,7 @@ def get_current_season_leaderboard(
         ORDER BY {profile["order_by"]}
         LIMIT :limit
         """,
-        {
-            "position": position,
-            "limit": limit,
-            "minimum_start_rate": minimum_start_rate,
-        },
+        parameters,
     )
     return {
         "source": (
@@ -1613,6 +1628,15 @@ def get_fpl_pick_leaderboard(
         max_price = max(3.0, min(float(max_price), 20.0))
 
     profile = profiles[position]
+    price_filter = "AND live.price <= :max_price" if max_price is not None else ""
+    parameters = {
+        "position": position,
+        "horizon": horizon,
+        "form_gameweeks": form_gameweeks,
+        "limit": limit,
+    }
+    if max_price is not None:
+        parameters["max_price"] = max_price
     rows = _read_dataframe(
         f"""
         WITH latest_live AS (
@@ -1805,7 +1829,7 @@ def get_fpl_pick_leaderboard(
             WHERE live.position = :position
               AND COALESCE(live.status, 'a') = 'a'
               AND COALESCE(live.chance_of_playing_next_round, 100) >= 75
-              AND (:max_price IS NULL OR live.price <= :max_price)
+              {price_filter}
               AND form.form_starts >= GREATEST(
                   1, CEIL(form.form_gameweeks_covered * 0.6)
               )::integer
@@ -1815,13 +1839,7 @@ def get_fpl_pick_leaderboard(
         ORDER BY minutes_risk_rank ASC, {profile["order_by"]}
         LIMIT :limit
         """,
-        {
-            "position": position,
-            "max_price": max_price,
-            "horizon": horizon,
-            "form_gameweeks": form_gameweeks,
-            "limit": limit,
-        },
+        parameters,
     )
     return {
         "source": (
