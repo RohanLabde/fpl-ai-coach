@@ -1,7 +1,12 @@
+import logging
+
 import streamlit as st
 import pandas as pd
 from sqlalchemy import text
 from collections import Counter
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 def get_database_connection():
@@ -833,10 +838,17 @@ _FORM_METRICS = {
 
 def _read_dataframe(sql, params=None):
     """Run a parameterised read-only query and return a dataframe."""
-    conn = get_database_connection()
-    with conn.session as session:
-        result = session.execute(text(sql), params or {})
-        return pd.DataFrame(result.mappings().all())
+    try:
+        conn = get_database_connection()
+        with conn.session as session:
+            result = session.execute(text(sql), params or {})
+            return pd.DataFrame(result.mappings().all())
+    except Exception:
+        # Keep request values and credentials out of logs; the query's first
+        # keyword is enough to identify the failed database operation.
+        operation = str(sql).lstrip().split(None, 1)[0].upper() or "UNKNOWN"
+        LOGGER.exception("FPL database lookup failed (operation=%s)", operation)
+        raise
 
 
 def _records(frame):

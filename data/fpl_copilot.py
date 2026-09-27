@@ -1,6 +1,7 @@
 """Grounded, read-only FPL chat assistant for the Streamlit application."""
 
 import json
+import logging
 import re
 from decimal import Decimal
 
@@ -29,6 +30,7 @@ except ImportError:  # Keep the rest of the Streamlit app usable until installed
 
 
 DEFAULT_MODEL = "gpt-5-mini"
+LOGGER = logging.getLogger(__name__)
 TOOL_HANDLERS = {
     "search_fpl_players": search_fpl_players,
     "compare_fpl_players": compare_fpl_players,
@@ -64,6 +66,7 @@ def _run_tool(name, arguments):
     try:
         return handler(**arguments)
     except Exception as error:
+        LOGGER.exception("FPL Copilot tool failed (tool=%s)", name)
         return {"error": f"Data lookup failed: {error}"}
 
 
