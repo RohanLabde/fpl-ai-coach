@@ -216,7 +216,14 @@ def _fallback_leaderboard_answer(plan, result):
                 )
             detail = "; ".join(detail_parts)
         bonus_detail = f"{_format_value(row.get('total_bonus'), 0)} bonus points"
-        lines.append(f"{rank}. **{name}** ({team}) — {detail}; {bonus_detail}")
+        availability = _availability_summary(row)
+        availability_warning = (
+            "" if availability == "Available" else f"; **availability:** {availability}"
+        )
+        lines.append(
+            f"{rank}. **{name}** ({team}) — {detail}; {bonus_detail}"
+            f"{availability_warning}"
+        )
 
     return "\n".join(lines)
 
@@ -290,6 +297,15 @@ def _availability_summary(row):
     status = str(row.get("status") or "").lower()
     chance = row.get("chance_of_playing_next_round")
     if status == "a":
+        try:
+            has_reduced_chance = chance is not None and float(chance) < 100
+        except (TypeError, ValueError):
+            has_reduced_chance = False
+        if has_reduced_chance:
+            return (
+                "Available; "
+                f"{_format_value(chance, 0)}% chance of playing next round"
+            )
         return "Available"
     if chance is not None:
         return f"{_format_value(chance, 0)}% chance of playing next round"
@@ -495,10 +511,17 @@ def _fallback_fpl_pick_answer(result):
     form_gameweeks = result.get("form_gameweeks", 3)
     budget = result.get("max_price")
     basis = result.get("ranking_basis", "position-specific recent form")
-    minimum_starts = result.get("minimum_recent_starts", 2)
+    minimum_starts = result.get("minimum_recent_starts")
+    minimum_chance = result.get("minimum_playing_chance", 75)
+    snapshot_age = result.get("live_snapshot_max_age_hours", 12)
+    starts_clause = (
+        f"at least {minimum_starts} recent start"
+        f"{'s' if minimum_starts != 1 else ''}"
+        if minimum_starts is not None
+        else "a recent-start threshold"
+    )
     eligibility = (
-        f"Available {position} players with at least {minimum_starts} recent "
-        f"start{'s' if minimum_starts != 1 else ''} across the last "
+        f"Freshly available {position} players with {starts_clause} across the last "
         f"{form_gameweeks} finalized gameweek"
         f"{'' if form_gameweeks == 1 else 's'}"
     )
@@ -510,7 +533,9 @@ def _fallback_fpl_pick_answer(result):
         f"**Ranking basis: {basis}**",
         (
             f"{eligibility}. Each entry shows season output, recent form, "
-            f"availability, and the next {horizon} fixtures."
+            f"availability, and the next {horizon} fixtures. Official availability "
+            f"must be fresh (within {snapshot_age} hours) and at least "
+            f"{minimum_chance}% when FPL provides a playing chance."
         ),
         "",
     ]
@@ -530,6 +555,7 @@ def _fallback_fpl_pick_answer(result):
         recent_starts = _format_value(row.get("form_starts"), 0)
         recent_xgi = _format_value(row.get("form_xgi"))
         recent_xgi_per_90 = _format_value(row.get("form_xgi_per_90"))
+        minutes_reliability = row.get("minutes_reliability") or "Minutes data unavailable"
         fdr = _format_value(row.get("average_fdr"), 2)
         fixtures = row.get("upcoming_fixtures") or "—"
         ownership = _format_value(row.get("selected_by_percent"))
@@ -561,7 +587,8 @@ def _fallback_fpl_pick_answer(result):
             [
                 (
                     f"   - Recent {form_gameweeks} GW form: {recent_points} points; "
-                    f"{recent_starts} starts; {recent_detail}."
+                    f"{recent_starts} starts; {recent_detail}; "
+                    f"minutes: {minutes_reliability}."
                 ),
                 (
                     f"   - Next {horizon}: average FDR {fdr}. Fixtures: {fixtures}."

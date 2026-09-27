@@ -9,6 +9,7 @@ _FORMATTERS_AVAILABLE = (
 )
 if _FORMATTERS_AVAILABLE:
     from data.fpl_copilot import (
+        _availability_summary,
         _fallback_player_comparison_answer,
         _fallback_player_form_answer,
         _fallback_player_profile_answer,
@@ -123,6 +124,14 @@ class PlayerAnswerFormatTests(unittest.TestCase):
         self.assertIn("Playing time: 80 minutes", answer)
         self.assertNotIn("0 starts", answer)
         self.assertIn("does not supply a start flag", answer)
+
+    def test_availability_keeps_official_playing_chance(self):
+        self.assertEqual(
+            _availability_summary(
+                {"status": "a", "chance_of_playing_next_round": 75}
+            ),
+            "Available; 75% chance of playing next round",
+        )
 
     def test_profile_renders_live_fields_and_availability(self):
         answer = _fallback_player_profile_answer(

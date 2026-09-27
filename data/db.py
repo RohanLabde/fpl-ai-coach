@@ -1395,6 +1395,14 @@ def get_current_season_leaderboard(
             SELECT MAX(season) AS season
             FROM public.fpl_completed_gameweek_stats
         ),
+        latest_live AS (
+            SELECT *
+            FROM public.fpl_live_player_snapshots
+            WHERE snapshot_at = (
+                SELECT MAX(snapshot_at)
+                FROM public.fpl_live_player_snapshots
+            )
+        ),
         season_context AS (
             SELECT
                 stats.season,
@@ -1482,8 +1490,15 @@ def get_current_season_leaderboard(
             FROM eligible
             WHERE starts >= minimum_starts_required
         )
-        SELECT *
+        SELECT
+            ranked.*,
+            live.status,
+            live.chance_of_playing_next_round,
+            live.news,
+            live.snapshot_at
         FROM ranked
+        LEFT JOIN latest_live AS live
+            ON live.player_id = ranked.player_id
         ORDER BY {profile["order_by"]}
         LIMIT :limit
         """,
@@ -1564,6 +1579,7 @@ def get_fpl_pick_leaderboard(
                 SELECT MAX(snapshot_at)
                 FROM public.fpl_live_player_snapshots
             )
+              AND snapshot_at >= now() - interval '12 hours'
         ),
         latest_season AS (
             SELECT MAX(season) AS season
@@ -1588,7 +1604,14 @@ def get_fpl_pick_leaderboard(
                 SUM(COALESCE(stats.expected_goal_involvements, 0)) AS form_xgi,
                 SUM(COALESCE(stats.clean_sheets, 0)) AS form_clean_sheets,
                 SUM(COALESCE(stats.defensive_contribution, 0))
-                    AS form_defensive_contribution
+                    AS form_defensive_contribution,
+                COUNT(*) AS form_gameweeks_covered,
+                MAX(COALESCE(stats.starts, 0)) FILTER (
+                    WHERE stats.gameweek = (SELECT MAX(gameweek) FROM recent_gameweeks)
+                ) AS latest_gameweek_starts,
+                MAX(COALESCE(stats.minutes, 0)) FILTER (
+                    WHERE stats.gameweek = (SELECT MAX(gameweek) FROM recent_gameweeks)
+                ) AS latest_gameweek_minutes
             FROM public.fpl_completed_gameweek_stats AS stats
             INNER JOIN latest_season
                 ON stats.season = latest_season.season
@@ -1696,6 +1719,9 @@ def get_fpl_pick_leaderboard(
                 form.form_xgi,
                 form.form_clean_sheets,
                 form.form_defensive_contribution,
+                form.form_gameweeks_covered,
+                form.latest_gameweek_starts,
+                form.latest_gameweek_minutes,
                 fixture.average_fdr,
                 fixture.upcoming_fixtures,
                 CASE WHEN form.form_minutes > 0
@@ -1709,7 +1735,23 @@ def get_fpl_pick_leaderboard(
                 END AS form_defensive_contribution_per_90,
                 CASE WHEN live.price > 0
                     THEN form.form_points * 1.0 / live.price
-                END AS form_points_per_price
+                END AS form_points_per_price,
+                GREATEST(
+                    1,
+                    CEIL(form.form_gameweeks_covered * 0.6)
+                )::integer AS minimum_recent_starts_required,
+                CASE
+                    WHEN COALESCE(form.latest_gameweek_starts, 0) = 0
+                        THEN 'Recent non-start'
+                    WHEN form.form_starts < form.form_gameweeks_covered
+                        THEN 'Some recent rotation'
+                    ELSE 'Strong recent minutes'
+                END AS minutes_reliability,
+                CASE
+                    WHEN COALESCE(form.latest_gameweek_starts, 0) = 0 THEN 2
+                    WHEN form.form_starts < form.form_gameweeks_covered THEN 1
+                    ELSE 0
+                END AS minutes_risk_rank
             FROM latest_live AS live
             INNER JOIN form_stats AS form
                 ON form.player_id = live.player_id
@@ -1719,14 +1761,15 @@ def get_fpl_pick_leaderboard(
                 ON fixture.team_id = live.team_id
             WHERE live.position = :position
               AND COALESCE(live.status, 'a') = 'a'
+              AND COALESCE(live.chance_of_playing_next_round, 100) >= 75
               AND (:max_price IS NULL OR live.price <= :max_price)
-              AND form.form_starts >= LEAST(
-                  2, (SELECT COUNT(*) FROM recent_gameweeks)
-              )
+              AND form.form_starts >= GREATEST(
+                  1, CEIL(form.form_gameweeks_covered * 0.6)
+              )::integer
         )
         SELECT *
         FROM candidates
-        ORDER BY {profile["order_by"]}
+        ORDER BY minutes_risk_rank ASC, {profile["order_by"]}
         LIMIT :limit
         """,
         {
@@ -1747,7 +1790,13 @@ def get_fpl_pick_leaderboard(
         "horizon": horizon,
         "form_gameweeks": form_gameweeks,
         "ranking_basis": profile["basis"],
-        "minimum_recent_starts": min(2, form_gameweeks),
+        "minimum_recent_starts": (
+            rows.iloc[0]["minimum_recent_starts_required"]
+            if not rows.empty
+            else None
+        ),
+        "minimum_playing_chance": 75,
+        "live_snapshot_max_age_hours": 12,
         "rows": _records(rows),
     }
 

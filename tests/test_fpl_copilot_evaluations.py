@@ -42,11 +42,11 @@ class DeterministicQuestionEvaluationTests(unittest.TestCase):
                 for key, expected in expected_arguments.items():
                     self.assertEqual(plan["arguments"][key], expected)
 
-    def test_position_rankings_use_position_appropriate_metrics(self):
+    def test_generic_position_rankings_default_to_fpl_points(self):
         cases = [
-            ("Who are the best FPL defenders this season?", "DEF", "defensive"),
-            ("Top 5 midfielders this season", "MID", "attacking"),
-            ("Best goalkeepers this season", "GKP", "goalkeeping"),
+            ("Who are the best FPL defenders this season?", "DEF", "points"),
+            ("Top 5 midfielders this season", "MID", "points"),
+            ("Best goalkeepers this season", "GKP", "points"),
         ]
 
         for question, position, metric in cases:
