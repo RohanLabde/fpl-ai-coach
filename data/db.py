@@ -851,7 +851,7 @@ def _records(frame):
 
 
 def search_fpl_players(query, position=None, limit=8):
-    """Find a player in the live snapshot, then fall back to historical data."""
+    """Find a player in the authoritative live snapshot, then historical data."""
     position = position.upper() if position else None
     if position and position not in _FPL_POSITIONS:
         raise ValueError("position must be one of GKP, DEF, MID, or FWD.")
@@ -869,26 +869,42 @@ def search_fpl_players(query, position=None, limit=8):
 
     live_rows = _read_dataframe(
         """
+        WITH latest_live_snapshot AS (
+            SELECT MAX(snapshot_at) AS snapshot_at
+            FROM public.fpl_live_player_snapshots
+        )
         SELECT
-            player_id,
-            first_name || ' ' || second_name AS player_name,
-            team_name,
-            position,
-            price,
-            total_points,
-            form,
-            selected_by_percent
-        FROM public.players
-        WHERE (first_name || ' ' || second_name) ILIKE :name_pattern
-          AND (:position IS NULL OR position = :position)
-        ORDER BY total_points DESC NULLS LAST, form DESC NULLS LAST
+            live.player_id,
+            COALESCE(
+                NULLIF(live.first_name || ' ' || live.second_name, ' '),
+                live.web_name
+            ) AS player_name,
+            live.team_name,
+            live.position,
+            live.price,
+            live.total_points,
+            live.form,
+            live.selected_by_percent,
+            live.status,
+            live.chance_of_playing_next_round,
+            live.news,
+            live.snapshot_at
+        FROM public.fpl_live_player_snapshots AS live
+        INNER JOIN latest_live_snapshot
+            ON live.snapshot_at = latest_live_snapshot.snapshot_at
+        WHERE (
+                (live.first_name || ' ' || live.second_name) ILIKE :name_pattern
+                OR live.web_name ILIKE :name_pattern
+            )
+          AND (:position IS NULL OR live.position = :position)
+        ORDER BY live.total_points DESC NULLS LAST, live.form DESC NULLS LAST
         LIMIT :limit
         """,
         params,
     )
     if not live_rows.empty:
         return {
-            "source": "players (latest imported FPL player snapshot)",
+            "source": "fpl_live_player_snapshots (latest live FPL player snapshot)",
             "rows": _records(live_rows),
         }
 
