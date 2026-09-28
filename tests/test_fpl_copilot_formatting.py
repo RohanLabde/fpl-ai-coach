@@ -37,15 +37,43 @@ class PlayerAnswerFormatTests(unittest.TestCase):
             }
         }
 
-        plan, team_hint = _pending_player_followup_plan(
+        plan, clarification = _pending_player_followup_plan(
             "David Raya from Arsenal", context
         )
 
         self.assertIsNotNone(plan)
         self.assertEqual(plan["intent"], "player_form")
         self.assertEqual(plan["player_names"], ["David Raya"])
-        self.assertEqual(team_hint, "Arsenal")
+        self.assertEqual(
+            clarification, {"team": "Arsenal", "player_index": 0}
+        )
         self.assertFalse(plan["needs_clarification"])
+
+    def test_team_qualifier_stays_with_the_ambiguous_comparison_player(self):
+        context = {
+            "pending_player_plan": {
+                "intent": "compare_players",
+                "player_names": ["Mbeumo", "Palmer", "Saka"],
+                "position": None,
+                "metric": None,
+                "scope": "player_research",
+                "gameweeks": 5,
+                "limit": 10,
+                "max_price": None,
+                "needs_clarification": False,
+                "clarification": "",
+                "pending_player_index": 1,
+            }
+        }
+
+        plan, clarification = _pending_player_followup_plan(
+            "Palmer from Chelsea", context
+        )
+
+        self.assertEqual(plan["player_names"], ["Mbeumo", "Palmer", "Saka"])
+        self.assertEqual(
+            clarification, {"team": "Chelsea", "player_index": 1}
+        )
 
     def test_recent_form_shows_official_total_and_scoring_events(self):
         answer = _fallback_player_form_answer(

@@ -791,7 +791,12 @@ _PLAYER_REPLY_PATTERN = re.compile(
 
 
 def _pending_player_followup_plan(question, conversation_state):
-    """Complete an explicit pending player choice without parsing prior prose."""
+    """Complete an explicit pending player choice without parsing prior prose.
+
+    The returned clarification records which player in a multi-player request
+    it belongs to.  A team such as "Chelsea" must not accidentally be applied
+    to the first player merely because that player is resolved first.
+    """
     pending = conversation_state.get("pending_player_plan")
     if not isinstance(pending, dict):
         return None, None
@@ -820,7 +825,10 @@ def _pending_player_followup_plan(question, conversation_state):
     raw["needs_clarification"] = False
     raw["clarification"] = ""
     raw.pop("pending_player_index", None)
-    return normalise_query_plan(raw), match.group("team")
+    return normalise_query_plan(raw), {
+        "team": match.group("team"),
+        "player_index": index,
+    }
 
 
 
@@ -837,16 +845,21 @@ def _conversation_context(messages):
 def _answer_planned_question(client, model, question, messages, conversation_state=None):
     """Plan, validate, resolve, then execute only a permitted read-only lookup."""
     conversation_state = conversation_state if isinstance(conversation_state, dict) else {}
-    plan, team_hint = _pending_player_followup_plan(question, conversation_state)
+    plan, clarification = _pending_player_followup_plan(
+        question, conversation_state
+    )
     if plan is None:
         conversation_state.pop("pending_player_plan", None)
-        team_hint = None
+        clarification = None
         plan = plan_fpl_question(
             client,
             model,
             question,
             conversation_context=_conversation_context(messages),
         )
+
+    team_hint = clarification.get("team") if clarification else None
+    team_hint_index = clarification.get("player_index") if clarification else None
 
     if plan["intent"] == "unsupported" or plan["needs_clarification"]:
         return (
@@ -931,7 +944,8 @@ def _answer_planned_question(client, model, question, messages, conversation_sta
         players = []
         for index, player_name in enumerate(plan["player_names"]):
             player, _search, message = _resolve_planned_player(
-                player_name, team_hint=team_hint if index == 0 else None
+                player_name,
+                team_hint=team_hint if index == team_hint_index else None,
             )
             if message:
                 pending = dict(plan)
