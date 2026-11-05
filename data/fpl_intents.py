@@ -27,7 +27,11 @@ _DATA_STATUS_WORDS = (
 )
 _TEAM_FIXTURE_WORDS = ("fixture", "fixtures", "schedule", "run")
 _EASY_FIXTURE_WORDS = ("easiest", "easy", "best run", "lowest difficulty")
-_TEAM_STRENGTH_WORDS = ("best", "strongest", "top", "leader", "leaders", "rank")
+_TEAM_STRENGTH_WORDS = (
+    "best", "strongest", "top", "leader", "leaders", "rank",
+    "weakest", "worst", "poorest",
+)
+_TEAM_WEAKNESS_WORDS = ("weakest", "worst", "poorest")
 _PICK_WORDS = ("pick", "picks", "option", "options", "recommend", "value")
 
 # “Top” means FPL performance for every position unless the question explicitly
@@ -169,18 +173,27 @@ def route_fpl_question(question):
         else:
             metric = None
         if metric:
-            gameweeks = _requested_gameweeks(normalized)
+            season_to_date = any(
+                phrase in normalized for phrase in _CURRENT_SEASON_WORDS
+            )
+            direction = (
+                "weakest"
+                if any(word in normalized for word in _TEAM_WEAKNESS_WORDS)
+                else "strongest"
+            )
             return {
                 "intent": "team_strength",
                 "tool_name": "get_team_strength_leaderboard",
                 "arguments": {
                     "metric": metric,
-                    "gameweeks": gameweeks,
+                    "gameweeks": _requested_gameweeks(normalized),
                     "limit": _requested_limit(normalized),
+                    "direction": direction,
+                    "scope": "season" if season_to_date else "recent",
                 },
                 "reason": (
-                    "The question asks for recent team form, using a transparent "
-                    "attacking or defensive ranking profile."
+                    "The question asks for a transparent team ranking with an "
+                    "explicit direction and time scope."
                 ),
             }
 

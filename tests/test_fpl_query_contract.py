@@ -39,6 +39,16 @@ class QueryPlanContractTests(unittest.TestCase):
                 {"intent": "team_strength", "metric": "defensive", "gameweeks": 3},
             ),
             (
+                "Which teams have the weakest defense this season?",
+                {
+                    "intent": "team_strength",
+                    "metric": "defensive",
+                    "direction": "weakest",
+                    "scope": "team_defensive_season",
+                    "limit": 10,
+                },
+            ),
+            (
                 "Who are the top 5 defenders this season?",
                 {
                     "intent": "leaderboard",

@@ -31,6 +31,17 @@ class DeterministicQuestionEvaluationTests(unittest.TestCase):
                 "get_team_strength_leaderboard",
                 {"metric": "defensive", "gameweeks": 3, "limit": 10},
             ),
+            (
+                "Which teams have the weakest defense this season?",
+                "team_strength",
+                "get_team_strength_leaderboard",
+                {
+                    "metric": "defensive",
+                    "direction": "weakest",
+                    "scope": "season",
+                    "limit": 10,
+                },
+            ),
         ]
 
         for question, intent, tool_name, expected_arguments in cases:

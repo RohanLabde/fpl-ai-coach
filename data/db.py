@@ -2321,38 +2321,39 @@ def get_team_fixture_horizon(horizon=5, limit=10):
     }
 
 
-def get_team_strength_leaderboard(metric="attacking", gameweeks=5, limit=10):
-    """Rank current-season teams using finalized player-gameweek totals only."""
+def get_team_strength_leaderboard(
+    metric="attacking", gameweeks=5, limit=10, direction="strongest", scope="recent"
+):
+    """Rank teams from finalized data with explicit direction and time scope."""
     metric = str(metric).lower()
+    direction = str(direction).lower()
+    scope = str(scope).lower()
     profiles = {
         "attacking": {
-            "order_by": "expected_goals DESC, goals_scored DESC, team_name ASC",
-            "basis": "recent attacking form: expected goals first, then goals scored",
+            "strongest_order": "expected_goals DESC, goals_scored DESC, team_name ASC",
+            "weakest_order": "expected_goals ASC, goals_scored ASC, team_name ASC",
         },
         "defensive": {
-            "order_by": (
+            "strongest_order": (
                 "clean_sheet_rate DESC, clean_sheets DESC, team_name ASC"
             ),
-            "basis": (
-                "recent defensive form: clean-sheet rate first, then total "
-                "clean sheets"
-            ),
+            "weakest_order": "clean_sheet_rate ASC, clean_sheets ASC, team_name ASC",
         },
     }
     if metric not in profiles:
         raise ValueError("metric must be 'attacking' or 'defensive'")
+    if direction not in {"strongest", "weakest"}:
+        raise ValueError("direction must be 'strongest' or 'weakest'")
+    if scope not in {"recent", "season"}:
+        raise ValueError("scope must be 'recent' or 'season'")
 
     gameweeks = max(1, min(int(gameweeks), 10))
     limit = max(1, min(int(limit), 15))
     profile = profiles[metric]
-    rows = _read_dataframe(
-        f"""
-        WITH latest_season AS (
-            SELECT season
-            FROM public.fpl_completed_gameweek_stats
-            ORDER BY season DESC
-            LIMIT 1
-        ),
+    recent_gameweeks_cte = ""
+    recent_gameweeks_join = ""
+    if scope == "recent":
+        recent_gameweeks_cte = """
         recent_gameweeks AS (
             SELECT DISTINCT stats.gameweek
             FROM public.fpl_completed_gameweek_stats AS stats
@@ -2361,6 +2362,37 @@ def get_team_strength_leaderboard(metric="attacking", gameweeks=5, limit=10):
             ORDER BY stats.gameweek DESC
             LIMIT :gameweeks
         ),
+        """
+        recent_gameweeks_join = """
+            INNER JOIN recent_gameweeks
+                ON stats.gameweek = recent_gameweeks.gameweek
+        """
+    time_label = (
+        "current-season" if scope == "season"
+        else f"latest {gameweeks} finalized gameweeks"
+    )
+    if metric == "defensive":
+        basis = (
+            f"{time_label} defensive weakness: lowest clean-sheet rate first, "
+            "then fewest clean sheets"
+            if direction == "weakest"
+            else f"{time_label} defensive strength: highest clean-sheet rate first, then total clean sheets"
+        )
+    else:
+        basis = (
+            f"{time_label} attacking weakness: lowest expected goals first, then goals scored"
+            if direction == "weakest"
+            else f"{time_label} attacking strength: expected goals first, then goals scored"
+        )
+    rows = _read_dataframe(
+        f"""
+        WITH latest_season AS (
+            SELECT season
+            FROM public.fpl_completed_gameweek_stats
+            ORDER BY season DESC
+            LIMIT 1
+        ),
+        {recent_gameweeks_cte}
         team_gameweeks AS (
             SELECT
                 stats.team_id,
@@ -2373,8 +2405,7 @@ def get_team_strength_leaderboard(metric="attacking", gameweeks=5, limit=10):
             FROM public.fpl_completed_gameweek_stats AS stats
             INNER JOIN latest_season
                 ON stats.season = latest_season.season
-            INNER JOIN recent_gameweeks
-                ON stats.gameweek = recent_gameweeks.gameweek
+            {recent_gameweeks_join}
             GROUP BY stats.team_id, stats.gameweek
         ),
         team_totals AS (
@@ -2404,7 +2435,7 @@ def get_team_strength_leaderboard(metric="attacking", gameweeks=5, limit=10):
                 expected_goals * 1.0 / NULLIF(fixtures, 0), 2
             ) AS expected_goals_per_fixture
         FROM team_totals
-        ORDER BY {profile["order_by"]}
+        ORDER BY {profile[f"{direction}_order"]}
         LIMIT :limit
         """,
         {"gameweeks": gameweeks, "limit": limit},
@@ -2415,7 +2446,9 @@ def get_team_strength_leaderboard(metric="attacking", gameweeks=5, limit=10):
             "player-gameweek totals)"
         ),
         "metric": metric,
-        "gameweeks": gameweeks,
-        "ranking_basis": profile["basis"],
+        "gameweeks": gameweeks if scope == "recent" else None,
+        "scope": scope,
+        "direction": direction,
+        "ranking_basis": basis,
         "rows": _records(rows),
     }

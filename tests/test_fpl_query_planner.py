@@ -124,6 +124,19 @@ class FplQueryPlanTests(unittest.TestCase):
         self.assertEqual(plan["intent"], "team_strength")
         self.assertEqual(plan["arguments"]["metric"], "defensive")
 
+    def test_weakest_season_defence_keeps_direction_and_scope(self):
+        plan = route_fpl_question("Which teams have the weakest defense this season?")
+        self.assertEqual(plan["intent"], "team_strength")
+        self.assertEqual(plan["arguments"]["metric"], "defensive")
+        self.assertEqual(plan["arguments"]["direction"], "weakest")
+        self.assertEqual(plan["arguments"]["scope"], "season")
+
+    def test_worst_recent_defences_keep_the_requested_window(self):
+        plan = route_fpl_question("Which teams have the worst defences in the last 3 gameweeks?")
+        self.assertEqual(plan["arguments"]["direction"], "weakest")
+        self.assertEqual(plan["arguments"]["scope"], "recent")
+        self.assertEqual(plan["arguments"]["gameweeks"], 3)
+
     def test_spaced_gameweek_window_is_preserved_for_team_form(self):
         plan = route_fpl_question(
             "Which teams have the best defensive form over the last 3 game weeks?"

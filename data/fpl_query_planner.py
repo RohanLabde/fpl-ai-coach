@@ -49,11 +49,14 @@ _ALLOWED_SCOPES = {
     "fixture_horizon",
     "team_attacking_form",
     "team_defensive_form",
+    "team_attacking_season",
+    "team_defensive_season",
     "data_coverage",
     "fpl_pick_research",
     "recent_form",
     "unknown",
 }
+_ALLOWED_DIRECTIONS = {"strongest", "weakest"}
 
 PLANNER_INSTRUCTIONS = """
 You are the query planner for FPL Copilot. Convert the user's FPL question into
@@ -69,7 +72,8 @@ Use these intents only:
 - upcoming_fixtures: future fixtures for one named player.
 - compare_players: comparison of two to four explicitly named players.
 - team_fixture_horizon: rank all teams by the difficulty of their next N fixtures.
-- team_strength: rank teams by recent attacking or defensive form.
+- team_strength: rank teams by attacking or defensive strength/weakness, either
+  over a recent gameweek window or across the current season.
 - fpl_picks: transparent, non-personal MID or DEF candidate ranking using
   recent finalized form, upcoming fixture difficulty, price, and starts.
 - unsupported: transfer, captaincy, squad, chip, or injury/line-up advice that
@@ -85,8 +89,11 @@ points; "best defensive defenders" means the defensive profile.
 
 Use current_season for player rankings. Use team_fixture_horizon for questions
 such as "which team has the easiest next five fixtures"; set gameweeks to that
-fixture horizon. Use team_strength for "best attacks" or "best defences"; use
-attacking or defensive as the metric and gameweeks as the recent form window.
+fixture horizon. Use team_strength for "best/strongest" or "weakest/worst"
+attacks or defences. Set direction to strongest or weakest. For "this season"
+or "current season", set scope to team_attacking_season or
+team_defensive_season. Otherwise use team_attacking_form or
+team_defensive_form and gameweeks as the recent form window.
 Use player_form for questions about a player's last N gameweeks, defaulting to
 5. Set form_window to gameweeks unless the user explicitly asks for matches or
 fixtures; then set form_window to matches. A match window must return separate
@@ -117,6 +124,7 @@ QUERY_PLAN_SCHEMA = {
         "position": {"type": "string", "enum": sorted(_ALLOWED_POSITIONS)},
         "metric": {"type": "string", "enum": sorted(_ALLOWED_METRICS)},
         "scope": {"type": "string", "enum": sorted(_ALLOWED_SCOPES)},
+        "direction": {"type": "string", "enum": sorted(_ALLOWED_DIRECTIONS)},
         "gameweeks": {"type": "integer", "minimum": 1, "maximum": 10},
         "form_gameweeks": {"type": "integer", "minimum": 1, "maximum": 10},
         "form_window": {"type": "string", "enum": ["gameweeks", "matches"]},
@@ -131,6 +139,7 @@ QUERY_PLAN_SCHEMA = {
         "position",
         "metric",
         "scope",
+        "direction",
         "gameweeks",
         "form_gameweeks",
         "form_window",
@@ -195,11 +204,18 @@ def _plan_from_routed_question(question):
                 else "performance"
             ),
             "team_fixture_horizon": "fixture_horizon",
-            "team_strength": "team_attacking_form"
-            if arguments.get("metric") == "attacking"
-            else "team_defensive_form",
+            "team_strength": (
+                "team_attacking_season"
+                if arguments.get("metric") == "attacking"
+                else "team_defensive_season"
+            ) if arguments.get("scope") == "season" else (
+                "team_attacking_form"
+                if arguments.get("metric") == "attacking"
+                else "team_defensive_form"
+            ),
             "fpl_picks": "fpl_pick_research",
         }.get(intent, "unknown"),
+        "direction": arguments.get("direction", "strongest"),
         "gameweeks": arguments.get(
             "recent_gameweeks",
             arguments.get("gameweeks", arguments.get("horizon", 5)),
@@ -364,6 +380,11 @@ def normalise_query_plan(raw):
     position = raw.get("position") if raw.get("position") in _ALLOWED_POSITIONS else "NONE"
     metric = raw.get("metric") if raw.get("metric") in _ALLOWED_METRICS else "NONE"
     scope = raw.get("scope") if raw.get("scope") in _ALLOWED_SCOPES else "unknown"
+    direction = (
+        raw.get("direction")
+        if raw.get("direction") in _ALLOWED_DIRECTIONS
+        else "strongest"
+    )
     names = _clean_player_names(raw.get("player_names"))
 
     if intent == "leaderboard" and metric == "NONE":
@@ -417,6 +438,7 @@ def normalise_query_plan(raw):
         "position": None if position == "NONE" else position,
         "metric": None if metric == "NONE" else metric,
         "scope": scope,
+        "direction": direction,
         "gameweeks": _bounded_int(raw.get("gameweeks"), 1, 10, 5),
         "form_gameweeks": _bounded_int(raw.get("form_gameweeks"), 1, 10, 3),
         "form_window": (

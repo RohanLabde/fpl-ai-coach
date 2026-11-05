@@ -264,11 +264,16 @@ def _fallback_team_strength_answer(result):
 
     metric = result.get("metric", "attacking")
     gameweeks = result.get("gameweeks", 5)
+    scope = result.get("scope", "recent")
     basis = result.get("ranking_basis", f"recent {metric} form")
     lines = [
         f"**Ranking basis: {basis}.**",
-        f"Based on the latest {gameweeks} finalized gameweek"
-        f"{'' if gameweeks == 1 else 's'}.",
+        (
+            "Based on all finalized gameweeks in the current season."
+            if scope == "season"
+            else f"Based on the latest {gameweeks} finalized gameweek"
+            f"{'' if gameweeks == 1 else 's'}."
+        ),
         "",
     ]
     for rank, row in enumerate(rows, start=1):
@@ -903,6 +908,14 @@ def _answer_planned_question(client, model, question, messages, conversation_sta
                 "metric": plan["metric"] or "attacking",
                 "gameweeks": plan["gameweeks"],
                 "limit": plan["limit"],
+                "direction": plan.get("direction", "strongest"),
+                "scope": (
+                    "season"
+                    if plan.get("scope") in {
+                        "team_attacking_season", "team_defensive_season"
+                    }
+                    else "recent"
+                ),
             },
         )
         sources = ["get_team_strength_leaderboard"]
