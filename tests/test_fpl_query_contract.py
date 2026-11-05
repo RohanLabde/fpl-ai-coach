@@ -75,6 +75,17 @@ class QueryPlanContractTests(unittest.TestCase):
                 },
             ),
             (
+                "Give me the best attacking midfielders from the last 5 gameweeks?",
+                {
+                    "intent": "leaderboard",
+                    "position": "MID",
+                    "metric": "attacking",
+                    "scope": "recent_form",
+                    "gameweeks": 5,
+                    "limit": 10,
+                },
+            ),
+            (
                 "Give me the top 5 midfield picks under £8m for the next 3 fixtures",
                 {
                     "intent": "fpl_picks",

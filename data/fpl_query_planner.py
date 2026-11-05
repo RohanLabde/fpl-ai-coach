@@ -51,6 +51,7 @@ _ALLOWED_SCOPES = {
     "team_defensive_form",
     "data_coverage",
     "fpl_pick_research",
+    "recent_form",
     "unknown",
 }
 
@@ -188,14 +189,21 @@ def _plan_from_routed_question(question):
         "metric": arguments.get("metric") or "NONE",
         "scope": {
             "data_status": "data_coverage",
-            "current_season_leaderboard": "performance",
+            "current_season_leaderboard": (
+                "recent_form"
+                if arguments.get("recent_gameweeks") is not None
+                else "performance"
+            ),
             "team_fixture_horizon": "fixture_horizon",
             "team_strength": "team_attacking_form"
             if arguments.get("metric") == "attacking"
             else "team_defensive_form",
             "fpl_picks": "fpl_pick_research",
         }.get(intent, "unknown"),
-        "gameweeks": arguments.get("gameweeks", arguments.get("horizon", 5)),
+        "gameweeks": arguments.get(
+            "recent_gameweeks",
+            arguments.get("gameweeks", arguments.get("horizon", 5)),
+        ),
         "form_gameweeks": arguments.get("form_gameweeks", 3),
         "form_window": "gameweeks",
         "limit": arguments.get("limit", 10),

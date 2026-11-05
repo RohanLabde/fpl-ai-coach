@@ -94,6 +94,16 @@ def _requested_gameweeks(question, default=5):
     return max(1, min(int(match.group(1)), 10))
 
 
+def _requested_recent_gameweeks(question):
+    """Return an explicit recent form window, never a defaulted one."""
+    match = re.search(
+        r"\b(?:last|recent)\s+(\d{1,2})\s+game\s*weeks?\b", question
+    )
+    if not match:
+        return None
+    return max(1, min(int(match.group(1)), 10))
+
+
 def _requested_next_fixture_horizon(question, default=5):
     """Extract only an upcoming-fixture horizon, never a form window."""
     match = re.search(r"\bnext\s+(\d{1,2})\s+fixtures?\b", question)
@@ -213,20 +223,25 @@ def route_fpl_question(question):
     is_current_season = any(
         phrase in normalized for phrase in _CURRENT_SEASON_WORDS
     )
-    if is_ranking and is_current_season:
+    recent_gameweeks = _requested_recent_gameweeks(normalized)
+    if is_ranking and (is_current_season or recent_gameweeks is not None):
         metric = _ranking_metric(normalized, position)
+        arguments = {
+            "metric": metric,
+            "position": position,
+            "limit": _requested_limit(normalized),
+        }
+        if recent_gameweeks is not None:
+            arguments["recent_gameweeks"] = recent_gameweeks
         return {
             "intent": "current_season_leaderboard",
             "tool_name": "get_current_season_leaderboard",
-            "arguments": {
-                "metric": metric,
-                "position": position,
-                "limit": _requested_limit(normalized),
-            },
+            "arguments": arguments,
             "reason": (
-                "The question is an explicit current-season FPL ranking. "
+                "The question is an explicit FPL ranking. "
                 "The selected ranking profile is position-aware unless the "
-                "user supplied a more specific metric."
+                "user supplied a more specific metric, and an explicit "
+                "recent gameweek window is retained."
             ),
         }
 

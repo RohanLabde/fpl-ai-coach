@@ -882,6 +882,11 @@ def _answer_planned_question(client, model, question, messages, conversation_sta
                 "metric": plan["metric"] or "points",
                 "position": plan["position"],
                 "limit": plan["limit"],
+                "recent_gameweeks": (
+                    plan["gameweeks"]
+                    if plan["scope"] == "recent_form"
+                    else None
+                ),
             },
         )
         sources = ["get_current_season_leaderboard"]

@@ -1427,9 +1427,10 @@ def compare_fpl_players(player_ids):
 
 
 def get_current_season_leaderboard(
-    metric="points", position=None, limit=10, minimum_start_rate=0.6
+    metric="points", position=None, limit=10, minimum_start_rate=0.6,
+    recent_gameweeks=None,
 ):
-    """Rank current-season players using transparent, position-aware profiles."""
+    """Rank current-season players, optionally over latest finalized GWs."""
     metric = metric.lower()
     if metric not in _CURRENT_SEASON_RANKINGS:
         raise ValueError(
@@ -1442,6 +1443,8 @@ def get_current_season_leaderboard(
 
     limit = max(1, min(int(limit), 15))
     minimum_start_rate = max(0.0, min(float(minimum_start_rate), 1.0))
+    if recent_gameweeks is not None:
+        recent_gameweeks = max(1, min(int(recent_gameweeks), 10))
     profile = _CURRENT_SEASON_RANKINGS[metric]
     position_filter = "WHERE stats.position = :position" if position else ""
     parameters = {
@@ -1450,6 +1453,24 @@ def get_current_season_leaderboard(
     }
     if position:
         parameters["position"] = position
+    recent_gameweeks_cte = ""
+    recent_gameweeks_join = ""
+    if recent_gameweeks is not None:
+        recent_gameweeks_cte = """
+        recent_gameweeks AS (
+            SELECT DISTINCT stats.gameweek
+            FROM public.fpl_completed_gameweek_stats AS stats
+            INNER JOIN latest_season
+                ON stats.season = latest_season.season
+            ORDER BY stats.gameweek DESC
+            LIMIT :recent_gameweeks
+        ),
+        """
+        recent_gameweeks_join = """
+            INNER JOIN recent_gameweeks
+                ON stats.gameweek = recent_gameweeks.gameweek
+        """
+        parameters["recent_gameweeks"] = recent_gameweeks
 
     rows = _read_dataframe(
         f"""
@@ -1465,6 +1486,7 @@ def get_current_season_leaderboard(
                 FROM public.fpl_live_player_snapshots
             )
         ),
+        {recent_gameweeks_cte}
         season_context AS (
             SELECT
                 stats.season,
@@ -1472,6 +1494,7 @@ def get_current_season_leaderboard(
             FROM public.fpl_completed_gameweek_stats AS stats
             INNER JOIN latest_season
                 ON stats.season = latest_season.season
+            {recent_gameweeks_join}
             GROUP BY stats.season
         ),
         totals AS (
@@ -1505,6 +1528,7 @@ def get_current_season_leaderboard(
                 ON stats.season = latest_season.season
             INNER JOIN season_context
                 ON stats.season = season_context.season
+            {recent_gameweeks_join}
             {position_filter}
             GROUP BY stats.player_id
         ),
@@ -1568,11 +1592,20 @@ def get_current_season_leaderboard(
     )
     return {
         "source": (
-            "fpl_completed_gameweek_stats (finalized current-season "
-            "gameweek totals)"
+            f"fpl_completed_gameweek_stats (latest {recent_gameweeks} finalized "
+            "gameweeks)"
+            if recent_gameweeks is not None
+            else "fpl_completed_gameweek_stats "
+            "(finalized current-season gameweek totals)"
         ),
         "metric": metric,
-        "ranking_basis": profile["basis"],
+        "ranking_basis": (
+            f"{profile['basis']} Based on the latest {recent_gameweeks} "
+            "finalized gameweeks."
+            if recent_gameweeks is not None
+            else profile["basis"]
+        ),
+        "gameweeks": recent_gameweeks,
         "minimum_start_rate": minimum_start_rate,
         "minimum_starts": (
             rows.iloc[0]["minimum_starts_required"] if not rows.empty else None

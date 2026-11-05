@@ -17,6 +17,22 @@ class FplIntentRouterTests(unittest.TestCase):
             {"metric": "attacking", "position": "MID", "limit": 10},
         )
 
+    def test_recent_attacking_midfielder_ranking_keeps_its_window(self):
+        plan = route_fpl_question(
+            "Give me the best attacking midfielders from the last 5 gameweeks?"
+        )
+
+        self.assertEqual(plan["intent"], "current_season_leaderboard")
+        self.assertEqual(
+            plan["arguments"],
+            {
+                "metric": "attacking",
+                "position": "MID",
+                "limit": 10,
+                "recent_gameweeks": 5,
+            },
+        )
+
     def test_current_season_defender_leaderboard_uses_fpl_points(self):
         plan = route_fpl_question("Who are the best defenders this season?")
 
