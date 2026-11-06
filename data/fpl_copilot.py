@@ -80,6 +80,9 @@ default. State the ranking basis in plain language, present a concise numbered
 list when the evidence is a leaderboard, and mention the completed-gameweek
 coverage. For defensive and goalkeeping profiles, foreground the profile's
 defensive statistics and do not frame goals or assists as ranking drivers.
+For attacking or xGI leaderboards, include each player's realised goals and
+assists alongside xGI and xGI per 90; xGI remains the ranking basis unless the
+evidence says otherwise.
 Do not invent statistics, recommendations, injuries, fixtures, or data that
 are not in the evidence. Format non-integer statistics to at most two decimal
 places. Never expose long raw database decimal values.
@@ -191,9 +194,15 @@ def _fallback_leaderboard_answer(plan, result):
                 f"{starts} starts"
             )
         elif metric in {"attacking", "xgi"}:
+            goals = row.get("total_goals") or 0
+            assists = row.get("total_assists") or 0
+            goal_label = "goal" if goals == 1 else "goals"
+            assist_label = "assist" if assists == 1 else "assists"
             detail = (
                 f"{_format_value(row.get('total_xgi'))} xGI; "
                 f"{_format_value(row.get('xgi_per_90'))} xGI per 90; "
+                f"{_format_value(goals, 0)} {goal_label}; "
+                f"{_format_value(assists, 0)} {assist_label}; "
                 f"{starts} starts"
             )
         else:
@@ -680,6 +689,10 @@ def _compose_evidence_answer(client, model, question, plan, result, sources):
         plan.get("intent") == "team_strength"
     ):
         return _fallback_team_strength_answer(result), sources
+    if plan.get("tool_name") == "get_current_season_leaderboard" or (
+        plan.get("intent") == "leaderboard"
+    ):
+        return _fallback_leaderboard_answer(plan, result), sources
     if plan.get("tool_name") == "get_live_player_profile" or (
         plan.get("intent") == "player_profile"
     ):
