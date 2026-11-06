@@ -1,4 +1,5 @@
 import logging
+import unicodedata
 
 import streamlit as st
 import pandas as pd
@@ -7,6 +8,41 @@ from collections import Counter
 
 
 LOGGER = logging.getLogger(__name__)
+
+_NAME_TRANSLITERATION = str.maketrans(
+    {
+        "æ": "ae",
+        "œ": "oe",
+        "ø": "o",
+        "ð": "d",
+        "đ": "d",
+        "þ": "th",
+        "ł": "l",
+    }
+)
+_SQL_ACCENTED_NAME_CHARACTERS = "àáâãäåāăąçćčďèéêëēĕėęěĝğíìîïīĭįıķĺľńñňóòôõöōŏőřśšşťúùûüūŭůűųýÿźž"
+_SQL_PLAIN_NAME_CHARACTERS = "aaaaaaaaacccdeeeeeeeeeggiiiiiiiikllnnnoooooooorssstuuuuuuuuuyyzz"
+
+
+def _normalise_player_name(value):
+    """Return a search key that tolerates common FPL name spellings."""
+    decomposed = unicodedata.normalize("NFKD", str(value).casefold())
+    without_marks = "".join(
+        character for character in decomposed if not unicodedata.combining(character)
+    )
+    return without_marks.translate(_NAME_TRANSLITERATION)
+
+
+def _normalised_player_name_sql(column):
+    """Build the matching PostgreSQL normalization for a trusted column name."""
+    return (
+        "REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE("
+        f"TRANSLATE(LOWER(COALESCE({column}, '')), "
+        f"'{_SQL_ACCENTED_NAME_CHARACTERS}', "
+        f"'{_SQL_PLAIN_NAME_CHARACTERS}'), "
+        "'ß', 'ss'), 'æ', 'ae'), 'œ', 'oe'), 'ø', 'o'), "
+        "'ð', 'd'), 'đ', 'd'), 'þ', 'th')"
+    )
 
 
 def get_database_connection():
@@ -875,6 +911,7 @@ def search_fpl_players(query, position=None, limit=8):
     limit = max(1, min(int(limit), 10))
     params = {
         "name_pattern": f"%{normalized_query}%",
+        "normalized_name_pattern": f"%{_normalise_player_name(normalized_query)}%",
         "limit": limit,
     }
     # Do not bind a nullable parameter into ``:value IS NULL OR ...``.
@@ -882,7 +919,8 @@ def search_fpl_players(query, position=None, limit=8):
     # that standalone NULL.  Compose the optional predicate instead, so an
     # omitted filter is genuinely absent from the query.
     live_position_filter = "AND live.position = :position" if position else ""
-    historical_position_filter = "AND position = :position" if position else ""
+    current_position_filter = "AND stats.position = :position" if position else ""
+    historical_position_filter = "AND history.position = :position" if position else ""
     if position:
         params["position"] = position
 
@@ -914,6 +952,8 @@ def search_fpl_players(query, position=None, limit=8):
         WHERE (
                 (live.first_name || ' ' || live.second_name) ILIKE :name_pattern
                 OR live.web_name ILIKE :name_pattern
+                OR {_normalised_player_name_sql("live.first_name || ' ' || live.second_name")} LIKE :normalized_name_pattern
+                OR {_normalised_player_name_sql("live.web_name")} LIKE :normalized_name_pattern
             )
           {live_position_filter}
         ORDER BY live.total_points DESC NULLS LAST, live.form DESC NULLS LAST
@@ -944,8 +984,11 @@ def search_fpl_players(query, position=None, limit=8):
             FROM public.fpl_completed_gameweek_stats AS stats
             INNER JOIN latest_season
                 ON stats.season = latest_season.season
-            WHERE stats.player_name ILIKE :name_pattern
-              {historical_position_filter}
+            WHERE (
+                    stats.player_name ILIKE :name_pattern
+                    OR {_normalised_player_name_sql("stats.player_name")} LIKE :normalized_name_pattern
+                )
+              {current_position_filter}
             ORDER BY stats.player_id, stats.gameweek DESC
         )
         SELECT *
@@ -967,17 +1010,23 @@ def search_fpl_players(query, position=None, limit=8):
     historical_rows = _read_dataframe(
         f"""
         WITH latest_player_rows AS (
-            SELECT DISTINCT ON (player_id)
-                player_id,
-                player_name,
-                team_name,
-                position,
-                season AS latest_historical_season,
-                gameweek AS latest_historical_gameweek
-            FROM public.player_gameweek
-            WHERE player_name ILIKE :name_pattern
+            SELECT DISTINCT ON (history.player_id)
+                history.player_id,
+                history.player_name,
+                history.team_name,
+                history.position,
+                history.season AS latest_historical_season,
+                history.gameweek AS latest_historical_gameweek
+            FROM public.player_gameweek AS history
+            WHERE (
+                    history.player_name ILIKE :name_pattern
+                    OR {_normalised_player_name_sql("history.player_name")} LIKE :normalized_name_pattern
+                )
               {historical_position_filter}
-            ORDER BY player_id, season DESC, gameweek DESC, fixture_id DESC
+            ORDER BY history.player_id,
+                     history.season DESC,
+                     history.gameweek DESC,
+                     history.fixture_id DESC
         )
         SELECT *
         FROM latest_player_rows

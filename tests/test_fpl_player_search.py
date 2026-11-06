@@ -12,11 +12,15 @@ _DB_AVAILABLE = all(
 if _DB_AVAILABLE:
     import pandas as pd
 
-    from data.db import search_fpl_players
+    from data.db import _normalise_player_name, search_fpl_players
 
 
 @unittest.skipUnless(_DB_AVAILABLE, "requires the application's optional runtime packages")
 class PlayerSearchTests(unittest.TestCase):
+    def test_name_normalization_handles_accents_and_common_equivalents(self):
+        self.assertEqual(_normalise_player_name("Pascal Groß"), "pascal gross")
+        self.assertEqual(_normalise_player_name("Martin Ødegaard"), "martin odegaard")
+
     def test_current_season_fallback_uses_qualified_columns(self):
         current_row = pd.DataFrame(
             [{"player_id": 99, "player_name": "Pascal Gross", "team_name": "Brighton"}]
@@ -28,6 +32,21 @@ class PlayerSearchTests(unittest.TestCase):
         current_query = reader.call_args_list[1].args[0]
         self.assertIn("stats.season AS latest_current_season", current_query)
         self.assertIn("stats.gameweek AS latest_current_gameweek", current_query)
+
+    def test_historical_search_accepts_an_ascii_spelling_of_an_accented_name(self):
+        historical_row = pd.DataFrame(
+            [{"player_id": 99, "player_name": "Pascal Groß", "team_name": "Brighton"}]
+        )
+        with patch(
+            "data.db._read_dataframe",
+            side_effect=[pd.DataFrame(), pd.DataFrame(), historical_row],
+        ) as reader:
+            result = search_fpl_players("Gross")
+
+        self.assertEqual(result["rows"][0]["player_name"], "Pascal Groß")
+        historical_query = reader.call_args_list[2].args[0]
+        self.assertIn("'ß', 'ss'", historical_query)
+        self.assertIn("normalized_name_pattern", reader.call_args_list[2].args[1])
 
 
 if __name__ == "__main__":
