@@ -934,19 +934,19 @@ def search_fpl_players(query, position=None, limit=8):
             FROM public.fpl_completed_gameweek_stats
         ),
         latest_current_rows AS (
-            SELECT DISTINCT ON (player_id)
-                player_id,
-                player_name,
-                team_name,
-                position,
-                season AS latest_current_season,
-                gameweek AS latest_current_gameweek
-            FROM public.fpl_completed_gameweek_stats
+            SELECT DISTINCT ON (stats.player_id)
+                stats.player_id,
+                stats.player_name,
+                stats.team_name,
+                stats.position,
+                stats.season AS latest_current_season,
+                stats.gameweek AS latest_current_gameweek
+            FROM public.fpl_completed_gameweek_stats AS stats
             INNER JOIN latest_season
-                ON fpl_completed_gameweek_stats.season = latest_season.season
-            WHERE player_name ILIKE :name_pattern
+                ON stats.season = latest_season.season
+            WHERE stats.player_name ILIKE :name_pattern
               {historical_position_filter}
-            ORDER BY player_id, gameweek DESC
+            ORDER BY stats.player_id, stats.gameweek DESC
         )
         SELECT *
         FROM latest_current_rows
