@@ -466,7 +466,7 @@ def _fallback_player_form_answer(result):
 
 
 def _fallback_player_comparison_answer(result):
-    """Render a transparent, position-aware comparison from verified rows."""
+    """Render a scan-friendly, side-by-side comparison from verified rows."""
     rows = result.get("rows", [])
     if len(rows) < 2:
         return "I could not find current comparable FPL data for both players."
@@ -478,54 +478,90 @@ def _fallback_player_comparison_answer(result):
         if recent_gameweeks is not None
         else "the current season"
     )
+    def table_cell(value):
+        """Keep player-supplied text safe inside a Markdown table cell."""
+        return str(value).replace("|", "\\|").replace("\n", " ")
+
+    def player_heading(row):
+        name = row.get("player_name", "Unknown player")
+        position = row.get("position", "Unknown position")
+        team = row.get("team_name", "Unknown team")
+        return table_cell(f"{name} ({position}, {team})")
+
+    def price(row):
+        value = row.get("price")
+        return "—" if value is None else f"£{_format_value(value)}m"
+
+    metrics = [
+        ("Current price", price),
+        ("Availability", _availability_summary),
+        (
+            f"FPL points — {period_label}",
+            lambda row: _format_value(row.get("season_points"), 0),
+        ),
+        ("Starts", lambda row: _format_value(row.get("season_starts"), 0)),
+        ("Minutes", lambda row: _format_value(row.get("season_minutes"), 0)),
+        ("Goals", lambda row: _format_value(row.get("season_goals"), 0)),
+        ("Assists", lambda row: _format_value(row.get("season_assists"), 0)),
+        ("Bonus", lambda row: _format_value(row.get("season_bonus"), 0)),
+        ("BPS", lambda row: _format_value(row.get("season_bps"), 0)),
+        ("xGI", lambda row: _format_value(row.get("season_xgi"))),
+        (
+            "xGI per 90",
+            lambda row: _format_value(row.get("season_xgi_per_90")),
+        ),
+        (
+            "Clean sheets",
+            lambda row: _format_value(row.get("season_clean_sheets"), 0),
+        ),
+    ]
+    positions = {str(row.get("position") or "").upper() for row in rows}
+    if "DEF" in positions:
+        metrics.append(
+            (
+                "Defensive contribution per 90",
+                lambda row: (
+                    _format_value(row.get("season_defensive_contribution_per_90"))
+                    if str(row.get("position") or "").upper() == "DEF"
+                    else "—"
+                ),
+            )
+        )
+    if "GKP" in positions:
+        metrics.append(
+            (
+                "Saves per 90",
+                lambda row: (
+                    _format_value(row.get("season_saves_per_90"))
+                    if str(row.get("position") or "").upper() == "GKP"
+                    else "—"
+                ),
+            )
+        )
+
     lines = [
         "**Player comparison**",
-        f"Uses the latest stored live details and finalized totals for {period_label}.",
+        f"Live details are current; performance totals cover {period_label}.",
         "",
+        "| Metric | " + " | ".join(player_heading(row) for row in rows) + " |",
+        "|---|" + "|".join("---:" for _ in rows) + "|",
     ]
+    for label, formatter in metrics:
+        values = " | ".join(table_cell(formatter(row)) for row in rows)
+        lines.append(f"| {label} | {values} |")
+
+    availability_notes = []
     for row in rows:
-        name = row.get("player_name", "Unknown player")
-        team = row.get("team_name", "Unknown team")
-        position = row.get("position", "Unknown position")
-        lines.extend(
-            [
-                f"**{name}** — {position}, {team}",
-                f"- Price: {_format_value(row.get('price'))}; "
-                f"availability: {_availability_summary(row)}",
-                f"- Finalized {period_label}: {_format_value(row.get('season_points'), 0)} "
-                f"points, {_format_value(row.get('season_starts'), 0)} starts, "
-                f"{_format_value(row.get('season_minutes'), 0)} minutes; "
-                f"{_format_value(row.get('season_bonus'), 0)} bonus points "
-                f"({_format_value(row.get('season_bonus_per_90'))} per 90); "
-                f"{_format_value(row.get('season_bps'), 0)} BPS",
-            ]
-        )
-        if position == "DEF":
-            lines.append(
-                f"- Defensive output: "
-                f"{_format_value(row.get('season_clean_sheets'), 0)} clean sheets; "
-                f"{_format_value(row.get('season_defensive_contribution_per_90'))} "
-                "defensive contribution per 90"
-            )
-        elif position == "GKP":
-            lines.append(
-                f"- Goalkeeping output: "
-                f"{_format_value(row.get('season_clean_sheets'), 0)} clean sheets; "
-                f"{_format_value(row.get('season_saves_per_90'))} saves per 90"
-            )
-        else:
-            lines.append(
-                f"- Attacking output: {_format_value(row.get('season_goals'), 0)} goals; "
-                f"{_format_value(row.get('season_assists'), 0)} assists; "
-                f"{_format_value(row.get('season_xgi'))} xGI "
-                f"({_format_value(row.get('season_xgi_per_90'))} per 90)"
-            )
         news = str(row.get("news") or "").strip()
         if news:
-            lines.append(f"- Availability note: {news}")
-        lines.append("")
-
-    return "\n".join(lines).rstrip()
+            availability_notes.append(
+                f"**{row.get('player_name', 'Unknown player')}**: {news}"
+            )
+    if availability_notes:
+        lines.extend(
+            ["", "**Availability notes:** " + "; ".join(availability_notes)]
+        )
+    return "\n".join(lines)
 
 
 def _fallback_fpl_pick_answer(result):

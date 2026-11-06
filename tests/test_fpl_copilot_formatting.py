@@ -225,10 +225,57 @@ class PlayerAnswerFormatTests(unittest.TestCase):
         )
 
         self.assertIn("**Player comparison**", answer)
-        self.assertIn("2 clean sheets", answer)
-        self.assertIn("defensive contribution per 90", answer)
-        self.assertIn("3 bonus points (1 per 90); 60 BPS", answer)
+        self.assertIn("| Metric | Defender One (DEF, Arsenal) | Defender Two (DEF, Chelsea) |", answer)
+        self.assertIn("| Clean sheets | 2 | 1 |", answer)
+        self.assertIn("| Defensive contribution per 90 | 5.4 | 4.1 |", answer)
+        self.assertIn("| Bonus | 3 | 1 |", answer)
         self.assertNotIn("Attacking output", answer)
+
+    def test_comparison_table_keeps_actual_attacking_output_and_window(self):
+        answer = _fallback_player_comparison_answer(
+            {
+                "recent_gameweeks": 4,
+                "rows": [
+                    {
+                        "player_name": "Mbeumo",
+                        "team_name": "Man Utd",
+                        "position": "MID",
+                        "price": 7.9,
+                        "status": "a",
+                        "season_points": 19,
+                        "season_starts": 4,
+                        "season_minutes": 360,
+                        "season_goals": 2,
+                        "season_assists": 0,
+                        "season_bonus": 2,
+                        "season_bps": 80,
+                        "season_xgi": 1.6,
+                        "season_xgi_per_90": 0.4,
+                    },
+                    {
+                        "player_name": "Rice",
+                        "team_name": "Arsenal",
+                        "position": "MID",
+                        "price": 7.4,
+                        "status": "a",
+                        "season_points": 27,
+                        "season_starts": 4,
+                        "season_minutes": 349,
+                        "season_goals": 0,
+                        "season_assists": 3,
+                        "season_bonus": 7,
+                        "season_bps": 112,
+                        "season_xgi": 1.6,
+                        "season_xgi_per_90": 0.4,
+                    },
+                ],
+            }
+        )
+
+        self.assertIn("performance totals cover the last 4 finalized gameweeks", answer)
+        self.assertIn("| Goals | 2 | 0 |", answer)
+        self.assertIn("| Assists | 0 | 3 |", answer)
+        self.assertIn("| xGI | 1.6 | 1.6 |", answer)
 
     def test_comparison_renders_mixed_positions_with_common_and_specific_metrics(self):
         answer = _fallback_player_comparison_answer(
@@ -287,14 +334,13 @@ class PlayerAnswerFormatTests(unittest.TestCase):
             }
         )
 
-        self.assertIn("**Goalkeeper One** — GKP, Arsenal", answer)
-        self.assertIn("saves per 90", answer)
-        self.assertIn("**Defender One** — DEF, Chelsea", answer)
-        self.assertIn("defensive contribution per 90", answer)
-        self.assertIn("**Midfielder One** — MID, Liverpool", answer)
-        self.assertIn("Attacking output", answer)
-        self.assertIn("5 starts", answer)
-        self.assertIn("Availability note: Knock being assessed", answer)
+        self.assertIn("Goalkeeper One (GKP, Arsenal)", answer)
+        self.assertIn("| Saves per 90 | 2.4 | — | — |", answer)
+        self.assertIn("Defender One (DEF, Chelsea)", answer)
+        self.assertIn("| Defensive contribution per 90 | — | 4.6 | — |", answer)
+        self.assertIn("Midfielder One (MID, Liverpool)", answer)
+        self.assertIn("| Starts | 5 | 5 | 5 |", answer)
+        self.assertIn("**Availability notes:** **Midfielder One**: Knock being assessed", answer)
 
 
 if __name__ == "__main__":
