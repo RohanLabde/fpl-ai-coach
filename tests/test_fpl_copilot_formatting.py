@@ -10,7 +10,9 @@ _FORMATTERS_AVAILABLE = (
 if _FORMATTERS_AVAILABLE:
     from data.fpl_copilot import (
         _availability_summary,
+        _ownership_summary,
         _fallback_player_comparison_answer,
+        _fallback_player_fixture_answer,
         _fallback_player_form_answer,
         _fallback_player_profile_answer,
         _pending_player_followup_plan,
@@ -153,6 +155,26 @@ class PlayerAnswerFormatTests(unittest.TestCase):
         self.assertNotIn("0 starts", answer)
         self.assertIn("does not supply a start flag", answer)
 
+    def test_upcoming_fixtures_include_current_ownership(self):
+        answer = _fallback_player_fixture_answer(
+            {
+                "rows": [
+                    {
+                        "player_name": "Bryan Mbeumo",
+                        "team_name": "Man Utd",
+                        "selected_by_percent": 8.1,
+                        "gameweek": 10,
+                        "opponent_team_name": "Everton",
+                        "venue": "home",
+                        "fixture_difficulty": 2,
+                    }
+                ]
+            }
+        )
+
+        self.assertIn("**Current selected by:** 8.1% — Differential.", answer)
+        self.assertIn("GW 10: Everton (H), FDR 2", answer)
+
     def test_availability_keeps_official_playing_chance(self):
         self.assertEqual(
             _availability_summary(
@@ -160,6 +182,10 @@ class PlayerAnswerFormatTests(unittest.TestCase):
             ),
             "Available; 75% chance of playing next round",
         )
+
+    def test_ownership_marks_low_owned_players_as_differentials(self):
+        self.assertEqual(_ownership_summary({"selected_by_percent": 8.1}), "8.1% — Differential")
+        self.assertEqual(_ownership_summary({"selected_by_percent": 10}), "10%")
 
     def test_profile_renders_live_fields_and_availability(self):
         answer = _fallback_player_profile_answer(
@@ -185,6 +211,7 @@ class PlayerAnswerFormatTests(unittest.TestCase):
 
         self.assertIn("**Mohamed Salah** — MID, Liverpool", answer)
         self.assertIn("**Season points:** 45", answer)
+        self.assertIn("**Current selected by:** 35.4%", answer)
         self.assertIn("**Availability:** Available", answer)
         self.assertIn("**Bonus:** 6 points (2 per 90); 85 BPS", answer)
 
@@ -251,6 +278,7 @@ class PlayerAnswerFormatTests(unittest.TestCase):
                         "season_bps": 80,
                         "season_xgi": 1.6,
                         "season_xgi_per_90": 0.4,
+                        "selected_by_percent": 8.1,
                     },
                     {
                         "player_name": "Rice",
@@ -267,6 +295,7 @@ class PlayerAnswerFormatTests(unittest.TestCase):
                         "season_bps": 112,
                         "season_xgi": 1.6,
                         "season_xgi_per_90": 0.4,
+                        "selected_by_percent": 18.2,
                     },
                 ],
             }
@@ -276,6 +305,7 @@ class PlayerAnswerFormatTests(unittest.TestCase):
         self.assertIn("| Goals | 2 | 0 |", answer)
         self.assertIn("| Assists | 0 | 3 |", answer)
         self.assertIn("| xGI | 1.6 | 1.6 |", answer)
+        self.assertIn("| Current selected by | 8.1% — Differential | 18.2% |", answer)
 
     def test_comparison_renders_mixed_positions_with_common_and_specific_metrics(self):
         answer = _fallback_player_comparison_answer(

@@ -1045,10 +1045,17 @@ def get_player_recent_form(player_id, gameweeks=5, window="gameweeks"):
                 history.expected_goal_involvements,
                 history.creativity,
                 history.threat,
+                live.selected_by_percent,
                 'completed_fixture' AS data_grain
             FROM public.player_gameweek AS history
             JOIN public.fpl_fixtures AS fixtures
               ON fixtures.fixture_id = history.fixture_id
+            LEFT JOIN public.fpl_live_player_snapshots AS live
+              ON live.player_id = history.player_id
+             AND live.snapshot_at = (
+                 SELECT MAX(snapshot_at)
+                 FROM public.fpl_live_player_snapshots
+             )
             INNER JOIN latest_season
               ON history.season = latest_season.season
             WHERE history.player_id = :player_id
@@ -1156,12 +1163,18 @@ def get_player_recent_form(player_id, gameweeks=5, window="gameweeks"):
                     AND completed.gameweek = history.gameweek
               )
         )
-        SELECT *
+        SELECT form.*, live.selected_by_percent
         FROM (
             SELECT * FROM completed_gameweeks
             UNION ALL
             SELECT * FROM fixture_history
         ) AS form
+        LEFT JOIN public.fpl_live_player_snapshots AS live
+          ON live.player_id = :player_id
+         AND live.snapshot_at = (
+             SELECT MAX(snapshot_at)
+             FROM public.fpl_live_player_snapshots
+         )
         ORDER BY season DESC, gameweek DESC, data_grain
         LIMIT :limit
         """,
@@ -1693,6 +1706,7 @@ def get_current_season_leaderboard(
         )
         SELECT
             ranked.*,
+            live.selected_by_percent,
             live.status,
             live.chance_of_playing_next_round,
             live.news,
@@ -2325,13 +2339,24 @@ def get_player_upcoming_fixtures(player_id, limit=5):
         """
         WITH latest_player AS (
             SELECT DISTINCT ON (player_id)
-                player_id, team_id, team_name, snapshot_at
+                player_id,
+                COALESCE(
+                    web_name,
+                    NULLIF(CONCAT_WS(' ', first_name, second_name), '')
+                ) AS player_name,
+                team_id,
+                team_name,
+                selected_by_percent,
+                snapshot_at
             FROM public.fpl_live_player_snapshots
             WHERE player_id = :player_id
             ORDER BY player_id, snapshot_at DESC
         )
         SELECT
             lp.snapshot_at,
+            lp.player_name,
+            lp.team_name,
+            lp.selected_by_percent,
             ff.gameweek,
             ff.kickoff_time,
             CASE

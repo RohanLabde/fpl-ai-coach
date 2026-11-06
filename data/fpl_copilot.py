@@ -146,6 +146,19 @@ def _format_value(value, decimal_places=1):
     return str(value)
 
 
+def _ownership_summary(row):
+    """Format current FPL ownership without implying it belongs to a past window."""
+    value = row.get("selected_by_percent")
+    if value is None:
+        return "Ownership not provided"
+    try:
+        ownership = float(value)
+    except (TypeError, ValueError):
+        return "Ownership not provided"
+    differential = " — Differential" if ownership < 10 else ""
+    return f"{_format_value(ownership)}%{differential}"
+
+
 def _fallback_leaderboard_answer(plan, result):
     """Render verified leaderboard evidence if the answer writer returns no text."""
     rows = result.get("rows", [])
@@ -228,13 +241,14 @@ def _fallback_leaderboard_answer(plan, result):
                 )
             detail = "; ".join(detail_parts)
         bonus_detail = f"{_format_value(row.get('total_bonus'), 0)} bonus points"
+        ownership = _ownership_summary(row)
         availability = _availability_summary(row)
         availability_warning = (
             "" if availability == "Available" else f"; **availability:** {availability}"
         )
         lines.append(
             f"{rank}. **{name}** ({team}) — {detail}; {bonus_detail}"
-            f"{availability_warning}"
+            f"; current selected by: {ownership}{availability_warning}"
         )
 
     return "\n".join(lines)
@@ -347,7 +361,7 @@ def _fallback_player_profile_answer(result):
         f"- **FPL price:** {_format_value(row.get('price'))}",
         f"- **Season points:** {_format_value(row.get('total_points'), 0)}",
         f"- **Current FPL form:** {_format_value(row.get('form'))}",
-        f"- **Ownership:** {_format_value(row.get('selected_by_percent'))}%",
+        f"- **Current selected by:** {_ownership_summary(row)}",
         f"- **Bonus:** {_format_value(row.get('season_bonus'), 0)} points "
         f"({_format_value(row.get('season_bonus_per_90'))} per 90); "
         f"{_format_value(row.get('season_bps'), 0)} BPS",
@@ -396,6 +410,9 @@ def _fallback_player_form_answer(result):
             "recorded scoring events behind it."
         ),
     ]
+    ownership = _ownership_summary(rows[0])
+    if ownership != "Ownership not provided":
+        lines.append(f"**Current selected by:** {ownership}.")
     if source:
         lines.append(f"Source: {source}.")
     lines.append("")
@@ -464,6 +481,29 @@ def _fallback_player_form_answer(result):
     return "\n".join(lines)
 
 
+def _fallback_player_fixture_answer(result):
+    """Render a player's upcoming fixtures with current ownership context."""
+    rows = result.get("rows", [])
+    if not rows:
+        return "I could not find upcoming stored fixtures for that player."
+
+    first = rows[0]
+    name = first.get("player_name") or "This player"
+    team = first.get("team_name") or "team unknown"
+    lines = [f"**Upcoming fixtures — {name} ({team})**"]
+    ownership = _ownership_summary(first)
+    if ownership != "Ownership not provided":
+        lines.append(f"**Current selected by:** {ownership}.")
+    lines.append("")
+
+    for row in rows:
+        gameweek = _format_value(row.get("gameweek"), 0)
+        opponent = row.get("opponent_team_name") or "opponent unknown"
+        venue = "H" if row.get("venue") == "home" else "A"
+        difficulty = _format_value(row.get("fixture_difficulty"), 0)
+        lines.append(f"- GW {gameweek}: {opponent} ({venue}), FDR {difficulty}")
+    return "\n".join(lines)
+
 
 def _fallback_player_comparison_answer(result):
     """Render a scan-friendly, side-by-side comparison from verified rows."""
@@ -495,6 +535,7 @@ def _fallback_player_comparison_answer(result):
     metrics = [
         ("Current price", price),
         ("Availability", _availability_summary),
+        ("Current selected by", _ownership_summary),
         (
             f"FPL points — {period_label}",
             lambda row: _format_value(row.get("season_points"), 0),
@@ -622,13 +663,13 @@ def _fallback_fpl_pick_answer(result):
         minutes_reliability = row.get("minutes_reliability") or "Minutes data unavailable"
         fdr = _format_value(row.get("average_fdr"), 2)
         fixtures = row.get("upcoming_fixtures") or "—"
-        ownership = _format_value(row.get("selected_by_percent"))
+        ownership = _ownership_summary(row)
 
         lines.extend(
             [
                 (
                     f"{rank}. **{name}** ({team}) — **£{price}m**; "
-                    f"{availability}; {ownership}% owned."
+                    f"{availability}; current selected by: {ownership}."
                 ),
                 (
                     f"   - Season: {season_points} FPL points; "
@@ -684,6 +725,10 @@ def _fallback_evidence_answer(plan, result):
         plan.get("intent") == "player_form"
     ):
         return _fallback_player_form_answer(result)
+    if plan.get("tool_name") == "get_player_upcoming_fixtures" or (
+        plan.get("intent") == "upcoming_fixtures"
+    ):
+        return _fallback_player_fixture_answer(result)
     if plan.get("tool_name") == "compare_fpl_players" or (
         plan.get("intent") == "compare_players"
     ):
@@ -744,6 +789,10 @@ def _compose_evidence_answer(client, model, question, plan, result, sources):
         plan.get("intent") == "player_form"
     ):
         return _fallback_player_form_answer(result), sources
+    if plan.get("tool_name") == "get_player_upcoming_fixtures" or (
+        plan.get("intent") == "upcoming_fixtures"
+    ):
+        return _fallback_player_fixture_answer(result), sources
     if plan.get("tool_name") == "compare_fpl_players" or (
         plan.get("intent") == "compare_players"
     ):
