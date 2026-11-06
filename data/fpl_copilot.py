@@ -471,9 +471,16 @@ def _fallback_player_comparison_answer(result):
     if len(rows) < 2:
         return "I could not find current comparable FPL data for both players."
 
+    recent_gameweeks = result.get("recent_gameweeks")
+    period_label = (
+        f"the last {recent_gameweeks} finalized gameweek"
+        f"{'' if recent_gameweeks == 1 else 's'}"
+        if recent_gameweeks is not None
+        else "the current season"
+    )
     lines = [
         "**Player comparison**",
-        "Uses the latest stored live details and finalized current-season totals.",
+        f"Uses the latest stored live details and finalized totals for {period_label}.",
         "",
     ]
     for row in rows:
@@ -485,7 +492,7 @@ def _fallback_player_comparison_answer(result):
                 f"**{name}** — {position}, {team}",
                 f"- Price: {_format_value(row.get('price'))}; "
                 f"availability: {_availability_summary(row)}",
-                f"- Finalized season: {_format_value(row.get('season_points'), 0)} "
+                f"- Finalized {period_label}: {_format_value(row.get('season_points'), 0)} "
                 f"points, {_format_value(row.get('season_starts'), 0)} starts, "
                 f"{_format_value(row.get('season_minutes'), 0)} minutes; "
                 f"{_format_value(row.get('season_bonus'), 0)} bonus points "
@@ -987,7 +994,12 @@ def _answer_planned_question(client, model, question, messages, conversation_sta
         conversation_state.pop("pending_player_plan", None)
         result = _run_tool(
             "compare_fpl_players",
-            {"player_ids": [int(player["player_id"]) for player in players]},
+            {
+                "player_ids": [int(player["player_id"]) for player in players],
+                "recent_gameweeks": (
+                    plan["gameweeks"] if plan["scope"] == "recent_form" else None
+                ),
+            },
         )
         sources = ["search_fpl_players", "compare_fpl_players"]
     else:

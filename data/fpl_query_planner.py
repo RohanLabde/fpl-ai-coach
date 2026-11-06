@@ -337,10 +337,25 @@ def _deterministic_player_form_plan(question):
 
 
 _COMPARE_PLAYERS_PATTERN = re.compile(
-    r"^\s*(?:compare|comparison\s+of)\s+(?P<names>.+?)"
-    r"(?:\s+(?:for|in|over)\s+(?:the\s+)?current\s+season)?\s*[?!.]*\s*$",
+    r"^\s*(?:compare|comparison\s+of)"
+    r"(?:\s+(?:stats?|statistics))?(?:\s+for)?\s+(?P<names>.+?)"
+    r"(?:\s+(?:for|in|over)\s+(?:the\s+)?"
+    r"(?:current\s+season|(?:last|recent)\s+\d{1,2}\s+game\s*weeks?))?"
+    r"\s*[?!.]*\s*$",
     re.IGNORECASE,
 )
+
+
+def _requested_comparison_gameweeks(question):
+    """Return an explicit recent comparison window, if the user supplied one."""
+    match = re.search(
+        r"\b(?:last|recent)\s+(\d{1,2})\s+game\s*weeks?\b",
+        str(question),
+        re.IGNORECASE,
+    )
+    if not match:
+        return None
+    return _bounded_int(match.group(1), 1, 10, 5)
 
 
 def _deterministic_comparison_plan(question):
@@ -357,14 +372,15 @@ def _deterministic_comparison_plan(question):
     if not 2 <= len(names) <= 4:
         return None
 
+    recent_gameweeks = _requested_comparison_gameweeks(question)
     return normalise_query_plan(
         {
             "intent": "compare_players",
             "player_names": names,
             "position": "NONE",
             "metric": "NONE",
-            "scope": "player_research",
-            "gameweeks": 5,
+            "scope": "recent_form" if recent_gameweeks is not None else "player_research",
+            "gameweeks": recent_gameweeks or 5,
             "limit": 10,
             "max_price": None,
             "needs_clarification": False,

@@ -927,6 +927,43 @@ def search_fpl_players(query, position=None, limit=8):
             "rows": _records(live_rows),
         }
 
+    current_rows = _read_dataframe(
+        f"""
+        WITH latest_season AS (
+            SELECT MAX(season) AS season
+            FROM public.fpl_completed_gameweek_stats
+        ),
+        latest_current_rows AS (
+            SELECT DISTINCT ON (player_id)
+                player_id,
+                player_name,
+                team_name,
+                position,
+                season AS latest_current_season,
+                gameweek AS latest_current_gameweek
+            FROM public.fpl_completed_gameweek_stats
+            INNER JOIN latest_season
+                ON fpl_completed_gameweek_stats.season = latest_season.season
+            WHERE player_name ILIKE :name_pattern
+              {historical_position_filter}
+            ORDER BY player_id, gameweek DESC
+        )
+        SELECT *
+        FROM latest_current_rows
+        ORDER BY latest_current_gameweek DESC, player_name
+        LIMIT :limit
+        """,
+        params,
+    )
+    if not current_rows.empty:
+        return {
+            "source": (
+                "fpl_completed_gameweek_stats (current finalized-season "
+                "player index)"
+            ),
+            "rows": _records(current_rows),
+        }
+
     historical_rows = _read_dataframe(
         f"""
         WITH latest_player_rows AS (
@@ -1311,8 +1348,8 @@ _CURRENT_SEASON_RANKINGS = {
 }
 
 
-def compare_fpl_players(player_ids):
-    """Return comparable live and current-season rows for two to four players."""
+def compare_fpl_players(player_ids, recent_gameweeks=None):
+    """Return comparable player rows for the season or a finalized GW window."""
     if not isinstance(player_ids, (list, tuple, set)):
         raise ValueError("player_ids must contain two to four FPL player IDs.")
 
@@ -1323,12 +1360,35 @@ def compare_fpl_players(player_ids):
             ids.append(value)
     if not 2 <= len(ids) <= 4:
         raise ValueError("Choose between two and four different FPL players to compare.")
+    if recent_gameweeks is not None:
+        recent_gameweeks = max(1, min(int(recent_gameweeks), 10))
 
     parameters = {
         f"player_{index}_id": player_id for index, player_id in enumerate(ids)
     }
     id_placeholders = ", ".join(f":player_{index}_id" for index in range(len(ids)))
     player_order = ", ".join(str(player_id) for player_id in ids)
+    requested_player_values = ", ".join(
+        f"(:player_{index}_id)" for index in range(len(ids))
+    )
+    recent_gameweeks_cte = ""
+    recent_gameweeks_join = ""
+    if recent_gameweeks is not None:
+        recent_gameweeks_cte = """
+        recent_gameweeks AS (
+            SELECT DISTINCT stats.gameweek
+            FROM public.fpl_completed_gameweek_stats AS stats
+            INNER JOIN latest_season
+                ON stats.season = latest_season.season
+            ORDER BY stats.gameweek DESC
+            LIMIT :recent_gameweeks
+        ),
+        """
+        recent_gameweeks_join = """
+            INNER JOIN recent_gameweeks
+                ON fpl_completed_gameweek_stats.gameweek = recent_gameweeks.gameweek
+        """
+        parameters["recent_gameweeks"] = recent_gameweeks
 
     rows = _read_dataframe(
         f"""
@@ -1339,6 +1399,63 @@ def compare_fpl_players(player_ids):
         latest_season AS (
             SELECT MAX(season) AS season
             FROM public.fpl_completed_gameweek_stats
+        ),
+        {recent_gameweeks_cte}
+        requested_players AS (
+            SELECT player_id
+            FROM (VALUES {requested_player_values}) AS requested(player_id)
+        ),
+        live_rows AS (
+            SELECT live.*
+            FROM public.fpl_live_player_snapshots AS live
+            INNER JOIN latest_live_snapshot
+                ON live.snapshot_at = latest_live_snapshot.snapshot_at
+        ),
+        current_identity AS (
+            SELECT DISTINCT ON (stats.player_id)
+                stats.player_id,
+                stats.player_name,
+                stats.team_name,
+                stats.position
+            FROM public.fpl_completed_gameweek_stats AS stats
+            INNER JOIN latest_season
+                ON stats.season = latest_season.season
+            WHERE stats.player_id IN ({id_placeholders})
+            ORDER BY stats.player_id, stats.gameweek DESC
+        ),
+        historical_identity AS (
+            SELECT DISTINCT ON (history.player_id)
+                history.player_id,
+                history.player_name,
+                history.team_name,
+                history.position
+            FROM public.player_gameweek AS history
+            WHERE history.player_id IN ({id_placeholders})
+            ORDER BY history.player_id, history.season DESC, history.gameweek DESC,
+                     history.fixture_id DESC
+        ),
+        player_identity AS (
+            SELECT
+                requested.player_id,
+                COALESCE(
+                    live.web_name,
+                    NULLIF(CONCAT_WS(' ', live.first_name, live.second_name), ''),
+                    current_player.player_name,
+                    historical.player_name
+                ) AS player_name,
+                COALESCE(live.position, current_player.position, historical.position) AS position,
+                COALESCE(live.team_name, current_player.team_name, historical.team_name) AS team_name,
+                live.price,
+                live.status,
+                live.chance_of_playing_next_round,
+                live.selected_by_percent,
+                live.news,
+                live.snapshot_at
+            FROM requested_players AS requested
+            LEFT JOIN live_rows AS live ON live.player_id = requested.player_id
+            LEFT JOIN current_identity AS current_player
+                ON current_player.player_id = requested.player_id
+            LEFT JOIN historical_identity AS historical ON historical.player_id = requested.player_id
         ),
         season_totals AS (
             SELECT
@@ -1358,21 +1475,21 @@ def compare_fpl_players(player_ids):
             FROM public.fpl_completed_gameweek_stats
             INNER JOIN latest_season
                 ON fpl_completed_gameweek_stats.season = latest_season.season
+            {recent_gameweeks_join}
             WHERE player_id IN ({id_placeholders})
             GROUP BY player_id
         )
         SELECT
-            live.player_id,
-            COALESCE(live.web_name,
-                     CONCAT_WS(' ', live.first_name, live.second_name)) AS player_name,
-            live.position,
-            live.team_name,
-            live.price,
-            live.status,
-            live.chance_of_playing_next_round,
-            live.selected_by_percent,
-            live.news,
-            live.snapshot_at,
+            identity.player_id,
+            identity.player_name,
+            identity.position,
+            identity.team_name,
+            identity.price,
+            identity.status,
+            identity.chance_of_playing_next_round,
+            identity.selected_by_percent,
+            identity.news,
+            identity.snapshot_at,
             COALESCE(totals.season_minutes, 0) AS season_minutes,
             COALESCE(totals.season_starts, 0) AS season_starts,
             COALESCE(totals.season_points, 0) AS season_points,
@@ -1407,21 +1524,19 @@ def compare_fpl_players(player_ids):
                 WHEN COALESCE(totals.season_minutes, 0) > 0
                     THEN totals.season_saves * 90.0 / totals.season_minutes
             END AS season_saves_per_90
-        FROM public.fpl_live_player_snapshots AS live
-        INNER JOIN latest_live_snapshot
-            ON live.snapshot_at = latest_live_snapshot.snapshot_at
+        FROM player_identity AS identity
         LEFT JOIN season_totals AS totals
-            ON totals.player_id = live.player_id
-        WHERE live.player_id IN ({id_placeholders})
-        ORDER BY array_position(ARRAY[{player_order}]::integer[], live.player_id)
+            ON totals.player_id = identity.player_id
+        ORDER BY array_position(ARRAY[{player_order}]::integer[], identity.player_id)
         """,
         parameters,
     )
     return {
         "source": (
-            "latest live player snapshot plus finalized current-season "
+            "unified live/current/historical player index plus finalized "
             "gameweek totals"
         ),
+        "recent_gameweeks": recent_gameweeks,
         "rows": _records(rows),
     }
 

@@ -183,6 +183,18 @@ class FplQueryPlanTests(unittest.TestCase):
         self.assertEqual(plan["player_names"], ["Mbeumo", "Palmer", "Saka"])
         self.assertFalse(plan["needs_clarification"])
 
+    def test_recent_comparison_keeps_its_requested_window(self):
+        plan = plan_fpl_question(
+            None,
+            None,
+            "Compare stats for Rice and Mbeumo for the last 4 gameweeks",
+        )
+
+        self.assertEqual(plan["intent"], "compare_players")
+        self.assertEqual(plan["player_names"], ["Rice", "Mbeumo"])
+        self.assertEqual(plan["scope"], "recent_form")
+        self.assertEqual(plan["gameweeks"], 4)
+
         four_player_plan = normalise_query_plan(
             {
                 "intent": "compare_players",
