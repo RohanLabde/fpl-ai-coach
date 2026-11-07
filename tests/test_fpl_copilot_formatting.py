@@ -13,6 +13,7 @@ if _FORMATTERS_AVAILABLE:
         _availability_summary,
         _answer_planned_question,
         _ownership_summary,
+        _fallback_leaderboard_answer,
         _fallback_player_comparison_answer,
         _fallback_player_fixture_answer,
         _fallback_player_form_answer,
@@ -258,10 +259,9 @@ class PlayerAnswerFormatTests(unittest.TestCase):
             }
         )
 
-        self.assertIn("**GW 4 — 14 FPL points**", answer)
-        self.assertIn("1 clean sheets, 4 saves", answer)
-        self.assertIn("3 bonus points; 38 BPS", answer)
-        self.assertIn("deductions: none recorded", answer)
+        self.assertIn("| GW | Pts | Mins | Starts | Goals | Assists |", answer)
+        self.assertIn("| 4 | 14 | 90 | 1 | 0 | 0 | 1 | 4 |", answer)
+        self.assertIn("| 3 | 38 | 8 | none recorded |", answer)
 
     def test_recent_match_form_labels_fixture_and_venue(self):
         answer = _fallback_player_form_answer(
@@ -281,8 +281,8 @@ class PlayerAnswerFormatTests(unittest.TestCase):
             }
         )
 
-        self.assertIn("**GW 5 vs Man City (H) — 8 FPL points**", answer)
-        self.assertIn("Playing time: 90 minutes; 1 starts", answer)
+        self.assertIn("| GW | Opponent | Venue | Pts | Mins | Starts |", answer)
+        self.assertIn("| 5 | Man City | H | 8 | 90 | 1 |", answer)
         self.assertIn("each fixture is shown separately", answer)
 
     def test_recent_match_form_does_not_invent_starts(self):
@@ -303,8 +303,8 @@ class PlayerAnswerFormatTests(unittest.TestCase):
             }
         )
 
-        self.assertIn("Playing time: 80 minutes", answer)
-        self.assertNotIn("0 starts", answer)
+        self.assertIn("| 5 | Man City | A | 2 | 80 | — |", answer)
+        self.assertNotIn("| 5 | Man City | A | 2 | 80 | 0 |", answer)
         self.assertIn("does not supply a start flag", answer)
 
     def test_upcoming_fixtures_include_current_ownership(self):
@@ -325,7 +325,53 @@ class PlayerAnswerFormatTests(unittest.TestCase):
         )
 
         self.assertIn("**Current selected by:** 8.1% — Differential.", answer)
-        self.assertIn("GW 10: Everton (H), FDR 2", answer)
+        self.assertIn("| GW | Opponent | Venue | FDR |", answer)
+        self.assertIn("| 10 | Everton | H | 2 |", answer)
+
+    def test_leaderboard_renders_comparable_players_as_a_table(self):
+        answer = _fallback_leaderboard_answer(
+            {"metric": "points"},
+            {
+                "metric": "points",
+                "ranking_basis": "FPL points leaders",
+                "minimum_starts": 6,
+                "rows": [
+                    {
+                        "player_name": "David Raya",
+                        "team_name": "Arsenal",
+                        "position": "GKP",
+                        "total_points": 54,
+                        "starts": 9,
+                        "minutes": 810,
+                        "total_clean_sheets": 6,
+                        "total_saves": 18,
+                        "total_bonus": 6,
+                        "selected_by_percent": 47.2,
+                        "status": "a",
+                        "season_completed_gameweeks": 9,
+                    },
+                    {
+                        "player_name": "James Trafford",
+                        "team_name": "Leeds",
+                        "position": "GKP",
+                        "total_points": 44,
+                        "starts": 9,
+                        "minutes": 810,
+                        "total_clean_sheets": 3,
+                        "total_saves": 33,
+                        "total_bonus": 8,
+                        "selected_by_percent": 6.3,
+                        "status": "a",
+                        "season_completed_gameweeks": 9,
+                    },
+                ],
+            },
+        )
+
+        self.assertIn("| Rank | Player | Team | Pos | Pts |", answer)
+        self.assertIn("| 1 | David Raya | Arsenal | GKP | 54 |", answer)
+        self.assertIn("| 2 | James Trafford | Leeds | GKP | 44 |", answer)
+        self.assertIn("6.3% — Differential", answer)
 
     def test_availability_keeps_official_playing_chance(self):
         self.assertEqual(

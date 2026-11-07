@@ -76,9 +76,10 @@ has already run and the supplied evidence is authoritative for this answer.
 
 Answer the user's question directly and practically. Do not ask for a metric,
 position, or other clarification when the plan already selected a standard FPL
-default. State the ranking basis in plain language, present a concise numbered
-list when the evidence is a leaderboard, and mention the completed-gameweek
-coverage. For defensive and goalkeeping profiles, foreground the profile's
+default. State the ranking basis in plain language, present comparable multi-row
+evidence as a compact Markdown table, and mention the completed-gameweek
+coverage. Use prose for interpretation, caveats, and single-player details. For
+defensive and goalkeeping profiles, foreground the profile's
 defensive statistics and do not frame goals or assists as ranking drivers.
 For attacking or xGI leaderboards, include each player's realised goals and
 assists alongside xGI and xGI per 90; xGI remains the ranking basis unless the
@@ -146,6 +147,24 @@ def _format_value(value, decimal_places=1):
     return str(value)
 
 
+def _table_cell(value):
+    """Keep evidence safe and readable inside a Markdown table cell."""
+    return str(value).replace("|", "\\|").replace("\n", " ")
+
+
+def _markdown_table(headers, rows):
+    """Build a compact, consistently valid Markdown table."""
+    lines = [
+        "| " + " | ".join(_table_cell(header) for header in headers) + " |",
+        "|" + "|".join("---" for _ in headers) + "|",
+    ]
+    lines.extend(
+        "| " + " | ".join(_table_cell(value) for value in row) + " |"
+        for row in rows
+    )
+    return "\n".join(lines)
+
+
 def _ownership_summary(row):
     """Format current FPL ownership without implying it belongs to a past window."""
     value = row.get("selected_by_percent")
@@ -189,68 +208,86 @@ def _fallback_leaderboard_answer(plan, result):
         lines.append(" ".join(coverage))
     lines.append("")
 
+    headers = ["Rank", "Player", "Team", "Pos"]
+    if metric == "defensive":
+        headers.extend(
+            ["Clean sheets", "Def. contrib./90", "Starts", "Selected by"]
+        )
+    elif metric == "goalkeeping":
+        headers.extend(["Clean sheets", "Saves/90", "Starts", "Selected by"])
+    elif metric in {"attacking", "xgi"}:
+        headers.extend(["xGI", "xGI/90", "Goals", "Assists", "Starts", "Selected by"])
+    else:
+        headers.extend(["Pts", "Starts", "Mins"])
+        if all(row.get("position") == "GKP" for row in rows):
+            headers.extend(["Clean sheets", "Saves", "Bonus", "Selected by"])
+        else:
+            headers.extend(["Goals", "Assists", "Clean sheets", "Bonus", "Selected by"])
+
+    table_rows = []
+    availability_notes = []
     for rank, row in enumerate(rows, start=1):
         name = row.get("player_name", "Unknown player")
         team = row.get("team_name", "Unknown team")
         starts = _format_value(row.get("starts"), 0)
 
         if metric == "defensive":
-            detail = (
-                f"{_format_value(row.get('total_clean_sheets'), 0)} clean sheets; "
-                f"{_format_value(row.get('defensive_contribution_per_90'))} defensive "
-                f"contribution per 90; {starts} starts"
-            )
+            values = [
+                _format_value(row.get("total_clean_sheets"), 0),
+                _format_value(row.get("defensive_contribution_per_90")),
+                starts,
+                _ownership_summary(row),
+            ]
         elif metric == "goalkeeping":
-            detail = (
-                f"{_format_value(row.get('total_clean_sheets'), 0)} clean sheets; "
-                f"{_format_value(row.get('saves_per_90'))} saves per 90; "
-                f"{starts} starts"
-            )
+            values = [
+                _format_value(row.get("total_clean_sheets"), 0),
+                _format_value(row.get("saves_per_90")),
+                starts,
+                _ownership_summary(row),
+            ]
         elif metric in {"attacking", "xgi"}:
-            goals = row.get("total_goals") or 0
-            assists = row.get("total_assists") or 0
-            goal_label = "goal" if goals == 1 else "goals"
-            assist_label = "assist" if assists == 1 else "assists"
-            detail = (
-                f"{_format_value(row.get('total_xgi'))} xGI; "
-                f"{_format_value(row.get('xgi_per_90'))} xGI per 90; "
-                f"{_format_value(goals, 0)} {goal_label}; "
-                f"{_format_value(assists, 0)} {assist_label}; "
-                f"{starts} starts"
-            )
+            values = [
+                _format_value(row.get("total_xgi")),
+                _format_value(row.get("xgi_per_90")),
+                _format_value(row.get("total_goals"), 0),
+                _format_value(row.get("total_assists"), 0),
+                starts,
+                _ownership_summary(row),
+            ]
         else:
-            detail_parts = [
-                f"{_format_value(row.get('total_points'), 0)} FPL points",
-                f"{starts} starts",
-                f"{_format_value(row.get('minutes'), 0)} minutes",
+            values = [
+                _format_value(row.get("total_points"), 0),
+                starts,
+                _format_value(row.get("minutes"), 0),
             ]
             if row.get("position") == "GKP":
-                detail_parts.extend(
+                values.extend(
                     [
-                        f"{_format_value(row.get('total_clean_sheets'), 0)} clean sheets",
-                        f"{_format_value(row.get('total_saves'), 0)} saves",
+                        _format_value(row.get("total_clean_sheets"), 0),
+                        _format_value(row.get("total_saves"), 0),
                     ]
                 )
             else:
-                detail_parts.extend(
+                values.extend(
                     [
-                        f"{_format_value(row.get('total_goals'), 0)} goals",
-                        f"{_format_value(row.get('total_assists'), 0)} assists",
-                        f"{_format_value(row.get('total_clean_sheets'), 0)} clean sheets",
+                        _format_value(row.get("total_goals"), 0),
+                        _format_value(row.get("total_assists"), 0),
+                        _format_value(row.get("total_clean_sheets"), 0),
                     ]
                 )
-            detail = "; ".join(detail_parts)
-        bonus_detail = f"{_format_value(row.get('total_bonus'), 0)} bonus points"
-        ownership = _ownership_summary(row)
+            values.extend(
+                [_format_value(row.get("total_bonus"), 0), _ownership_summary(row)]
+            )
+        table_rows.append(
+            [rank, name, team, row.get("position") or "—", *values]
+        )
         availability = _availability_summary(row)
-        availability_warning = (
-            "" if availability == "Available" else f"; **availability:** {availability}"
-        )
-        lines.append(
-            f"{rank}. **{name}** ({team}) — {detail}; {bonus_detail}"
-            f"; current selected by: {ownership}{availability_warning}"
-        )
+        if availability != "Available":
+            availability_notes.append(f"**{name}**: {availability}")
 
+    lines.append(_markdown_table(headers, table_rows))
+    if availability_notes:
+        lines.extend(["", "**Availability notes:** " + "; ".join(availability_notes)])
     return "\n".join(lines)
 
 
@@ -267,15 +304,22 @@ def _fallback_fixture_horizon_answer(result):
         "Lower FDR means an easier fixture run.",
         "",
     ]
-    for rank, row in enumerate(rows, start=1):
-        lines.append(
-            f"{rank}. **{row.get('team_name', 'Unknown team')}** — "
-            f"average FDR {_format_value(row.get('average_fdr'), 2)}; "
-            f"{_format_value(row.get('home_fixtures'), 0)} home and "
-            f"{_format_value(row.get('away_fixtures'), 0)} away across "
-            f"the next {horizon} fixtures. "
-            f"Run: {row.get('upcoming_fixtures', '—')}."
+    lines.append(
+        _markdown_table(
+            ["Rank", "Team", "Avg. FDR", "Home", "Away", "Next fixtures"],
+            [
+                [
+                    rank,
+                    row.get("team_name", "Unknown team"),
+                    _format_value(row.get("average_fdr"), 2),
+                    _format_value(row.get("home_fixtures"), 0),
+                    _format_value(row.get("away_fixtures"), 0),
+                    row.get("upcoming_fixtures", "—"),
+                ]
+                for rank, row in enumerate(rows, start=1)
+            ],
         )
+    )
     return "\n".join(lines)
 
 
@@ -299,26 +343,32 @@ def _fallback_team_strength_answer(result):
         ),
         "",
     ]
-    for rank, row in enumerate(rows, start=1):
-        team = row.get("team_name", "Unknown team")
-        fixtures = _format_value(row.get("fixtures"), 0)
-        if metric == "defensive":
-            clean_sheets = row.get("clean_sheets") or 0
-            clean_sheet_label = "clean sheet" if clean_sheets == 1 else "clean sheets"
-            detail = (
-                f"{_format_value(clean_sheets, 0)} {clean_sheet_label} "
-                f"from {fixtures} fixtures "
-                f"({_format_percentage(row.get('clean_sheet_rate'))} clean-sheet rate)"
-            )
-        else:
-            detail = (
-                f"{_format_value(row.get('expected_goals'), 2)} xG; "
-                f"{_format_value(row.get('goals_scored'), 0)} goals from "
-                f"{fixtures} fixtures "
-                f"({_format_value(row.get('expected_goals_per_fixture'), 2)} xG "
-                f"per fixture)"
-            )
-        lines.append(f"{rank}. **{team}** — {detail}.")
+    if metric == "defensive":
+        headers = ["Rank", "Team", "Fixtures", "Clean sheets", "CS rate"]
+        table_rows = [
+            [
+                rank,
+                row.get("team_name", "Unknown team"),
+                _format_value(row.get("fixtures"), 0),
+                _format_value(row.get("clean_sheets"), 0),
+                _format_percentage(row.get("clean_sheet_rate")),
+            ]
+            for rank, row in enumerate(rows, start=1)
+        ]
+    else:
+        headers = ["Rank", "Team", "Fixtures", "xG", "Goals", "xG/fixture"]
+        table_rows = [
+            [
+                rank,
+                row.get("team_name", "Unknown team"),
+                _format_value(row.get("fixtures"), 0),
+                _format_value(row.get("expected_goals"), 2),
+                _format_value(row.get("goals_scored"), 0),
+                _format_value(row.get("expected_goals_per_fixture"), 2),
+            ]
+            for rank, row in enumerate(rows, start=1)
+        ]
+    lines.append(_markdown_table(headers, table_rows))
     return "\n".join(lines)
 
 
@@ -406,7 +456,7 @@ def _fallback_player_form_answer(result):
         (
             "Each row is one finalized match and its official FPL score."
             if is_match_window
-            else "Each total is the official FPL score. The detail below shows the "
+            else "Each total is the official FPL score. The table below shows the "
             "recorded scoring events behind it."
         ),
     ]
@@ -417,50 +467,56 @@ def _fallback_player_form_answer(result):
         lines.append(f"Source: {source}.")
     lines.append("")
 
+    headers = ["GW"]
+    if is_match_window:
+        headers.extend(["Opponent", "Venue"])
+    headers.extend(
+        [
+            "Pts",
+            "Mins",
+            "Starts",
+            "Goals",
+            "Assists",
+            "Clean sheets",
+            "Saves",
+            "Pen. saves",
+            "Conceded",
+            "Bonus",
+            "BPS",
+            "Def. contrib.",
+            "Deductions",
+        ]
+    )
+    table_rows = []
     for row in rows:
-        gameweek = _format_value(row.get("gameweek"), 0)
-        total_points = _format_value(row.get("total_points"), 0)
-        minutes = _format_value(row.get("minutes"), 0)
         starts = row.get("starts")
-        formatted_starts = _format_value(starts, 0) if starts is not None else None
-        fixture_label = f"GW {gameweek}"
+        values = [_format_value(row.get("gameweek"), 0)]
         if is_match_window:
-            opponent = row.get("opponent_team_name") or "opponent unknown"
-            venue = "H" if row.get("was_home") else "A"
-            fixture_label = f"GW {gameweek} vs {opponent} ({venue})"
-        lines.extend(
+            values.extend(
+                [
+                    row.get("opponent_team_name") or "opponent unknown",
+                    "H" if row.get("was_home") else "A",
+                ]
+            )
+        values.extend(
             [
-                f"**{fixture_label} — {total_points} FPL points**",
-                (
-                    f"- Playing time: {minutes} minutes; {formatted_starts} starts"
-                    if formatted_starts is not None
-                    else f"- Playing time: {minutes} minutes"
-                ),
-                (
-                    "- Attacking events: "
-                    f"{_format_value(row.get('goals_scored'), 0)} goals, "
-                    f"{_format_value(row.get('assists'), 0)} assists"
-                ),
-                (
-                    "- Defensive/goalkeeping events: "
-                    f"{_format_value(row.get('clean_sheets'), 0)} clean sheets, "
-                    f"{_format_value(row.get('saves'), 0)} saves, "
-                    f"{_format_value(row.get('penalties_saved'), 0)} penalties saved, "
-                    f"{_format_value(row.get('goals_conceded'), 0)} goals conceded"
-                ),
-                (
-                    "- Bonus and BPS: "
-                    f"{_format_value(row.get('bonus'), 0)} bonus points; "
-                    f"{_format_value(row.get('bps'), 0)} BPS"
-                ),
-                (
-                    "- Defensive contribution: "
-                    f"{_format_value(row.get('defensive_contribution'), 0)}; "
-                    f"deductions: {_form_deduction_summary(row)}"
-                ),
-                "",
+                _format_value(row.get("total_points"), 0),
+                _format_value(row.get("minutes"), 0),
+                _format_value(starts, 0) if starts is not None else "—",
+                _format_value(row.get("goals_scored"), 0),
+                _format_value(row.get("assists"), 0),
+                _format_value(row.get("clean_sheets"), 0),
+                _format_value(row.get("saves"), 0),
+                _format_value(row.get("penalties_saved"), 0),
+                _format_value(row.get("goals_conceded"), 0),
+                _format_value(row.get("bonus"), 0),
+                _format_value(row.get("bps"), 0),
+                _format_value(row.get("defensive_contribution"), 0),
+                _form_deduction_summary(row),
             ]
         )
+        table_rows.append(values)
+    lines.extend(["", _markdown_table(headers, table_rows)])
 
     if is_match_window:
         lines.append(
@@ -496,12 +552,23 @@ def _fallback_player_fixture_answer(result):
         lines.append(f"**Current selected by:** {ownership}.")
     lines.append("")
 
-    for row in rows:
-        gameweek = _format_value(row.get("gameweek"), 0)
-        opponent = row.get("opponent_team_name") or "opponent unknown"
-        venue = "H" if row.get("venue") == "home" else "A"
-        difficulty = _format_value(row.get("fixture_difficulty"), 0)
-        lines.append(f"- GW {gameweek}: {opponent} ({venue}), FDR {difficulty}")
+    lines.extend(
+        [
+            "",
+            _markdown_table(
+                ["GW", "Opponent", "Venue", "FDR"],
+                [
+                    [
+                        _format_value(row.get("gameweek"), 0),
+                        row.get("opponent_team_name") or "opponent unknown",
+                        "H" if row.get("venue") == "home" else "A",
+                        _format_value(row.get("fixture_difficulty"), 0),
+                    ]
+                    for row in rows
+                ],
+            ),
+        ]
+    )
     return "\n".join(lines)
 
 
@@ -518,15 +585,11 @@ def _fallback_player_comparison_answer(result):
         if recent_gameweeks is not None
         else "the current season"
     )
-    def table_cell(value):
-        """Keep player-supplied text safe inside a Markdown table cell."""
-        return str(value).replace("|", "\\|").replace("\n", " ")
-
     def player_heading(row):
         name = row.get("player_name", "Unknown player")
         position = row.get("position", "Unknown position")
         team = row.get("team_name", "Unknown team")
-        return table_cell(f"{name} ({position}, {team})")
+        return _table_cell(f"{name} ({position}, {team})")
 
     def price(row):
         value = row.get("price")
@@ -588,7 +651,7 @@ def _fallback_player_comparison_answer(result):
         "|---|" + "|".join("---:" for _ in rows) + "|",
     ]
     for label, formatter in metrics:
-        values = " | ".join(table_cell(formatter(row)) for row in rows)
+        values = " | ".join(_table_cell(formatter(row)) for row in rows)
         lines.append(f"| {label} | {values} |")
 
     availability_notes = []
@@ -644,62 +707,69 @@ def _fallback_fpl_pick_answer(result):
         ),
         "",
     ]
-    for rank, row in enumerate(rows, start=1):
-        name = row.get("player_name", "Unknown player")
-        team = row.get("team_name", "Unknown team")
-        price = _format_value(row.get("price"))
-        availability = _availability_summary(row)
-        season_points = _format_value(row.get("season_points"), 0)
-        season_starts = _format_value(row.get("season_starts"), 0)
-        season_minutes = _format_value(row.get("season_minutes"), 0)
-        season_goals = _format_value(row.get("season_goals"), 0)
-        season_assists = _format_value(row.get("season_assists"), 0)
-        season_bonus = _format_value(row.get("season_bonus"), 0)
-        season_xgi = _format_value(row.get("season_xgi"))
-        recent_points = _format_value(row.get("form_points"), 0)
-        recent_starts = _format_value(row.get("form_starts"), 0)
-        recent_xgi = _format_value(row.get("form_xgi"))
-        recent_xgi_per_90 = _format_value(row.get("form_xgi_per_90"))
-        minutes_reliability = row.get("minutes_reliability") or "Minutes data unavailable"
-        fdr = _format_value(row.get("average_fdr"), 2)
-        fixtures = row.get("upcoming_fixtures") or "—"
-        ownership = _ownership_summary(row)
+    headers = [
+        "Rank",
+        "Player",
+        "Team",
+        "Price",
+        "Selected by",
+        "Season pts",
+        "Season starts",
+        "Season mins",
+        "Recent pts",
+        "Recent starts",
+    ]
+    if position == "DEF":
+        headers.extend(["Recent CS rate", "Def. contrib./90"])
+    else:
+        headers.extend(["Recent xGI", "Recent xGI/90"])
+    headers.extend(["Avg. FDR", "Next fixtures"])
 
-        lines.extend(
-            [
-                (
-                    f"{rank}. **{name}** ({team}) — **£{price}m**; "
-                    f"{availability}; current selected by: {ownership}."
-                ),
-                (
-                    f"   - Season: {season_points} FPL points; "
-                    f"{season_goals} goals, {season_assists} assists, "
-                    f"{season_bonus} bonus; {season_starts} starts / "
-                    f"{season_minutes} minutes; {season_xgi} xGI."
-                ),
-            ]
-        )
+    table_rows = []
+    availability_notes = []
+    for rank, row in enumerate(rows, start=1):
+        values = [
+            rank,
+            row.get("player_name", "Unknown player"),
+            row.get("team_name", "Unknown team"),
+            f"£{_format_value(row.get('price'))}m",
+            _ownership_summary(row),
+            _format_value(row.get("season_points"), 0),
+            _format_value(row.get("season_starts"), 0),
+            _format_value(row.get("season_minutes"), 0),
+            _format_value(row.get("form_points"), 0),
+            _format_value(row.get("form_starts"), 0),
+        ]
         if position == "DEF":
-            recent_detail = (
-                f"{_format_percentage(row.get('form_clean_sheet_rate'))} "
-                "clean-sheet rate; "
-                f"{_format_value(row.get('form_defensive_contribution_per_90'))} "
-                "defensive contribution per 90"
+            values.extend(
+                [
+                    _format_percentage(row.get("form_clean_sheet_rate")),
+                    _format_value(row.get("form_defensive_contribution_per_90")),
+                ]
             )
         else:
-            recent_detail = f"{recent_xgi} xGI ({recent_xgi_per_90} per 90)"
-        lines.extend(
+            values.extend(
+                [
+                    _format_value(row.get("form_xgi")),
+                    _format_value(row.get("form_xgi_per_90")),
+                ]
+            )
+        values.extend(
             [
-                (
-                    f"   - Recent {form_gameweeks} GW form: {recent_points} points; "
-                    f"{recent_starts} starts; {recent_detail}; "
-                    f"minutes: {minutes_reliability}."
-                ),
-                (
-                    f"   - Next {horizon}: average FDR {fdr}. Fixtures: {fixtures}."
-                ),
+                _format_value(row.get("average_fdr"), 2),
+                row.get("upcoming_fixtures") or "—",
             ]
         )
+        table_rows.append(values)
+        availability = _availability_summary(row)
+        if availability != "Available":
+            availability_notes.append(
+                f"**{row.get('player_name', 'Unknown player')}**: {availability}"
+            )
+
+    lines.append(_markdown_table(headers, table_rows))
+    if availability_notes:
+        lines.extend(["", "**Availability notes:** " + "; ".join(availability_notes)])
 
     return "\n".join(lines)
 
@@ -749,15 +819,12 @@ def _fallback_evidence_answer(plan, result):
             ) if any(key in row for row in preview)
         ]
         if columns:
-            header = " | ".join(column.replace("_", " ").title() for column in columns)
-            divider = " | ".join("---" for _ in columns)
+            header = [column.replace("_", " ").title() for column in columns]
             body = [
-                " | ".join(_format_value(row.get(column)) for column in columns)
+                [_format_value(row.get(column)) for column in columns]
                 for row in preview
             ]
-            return "\n".join(
-                ["Here are the verified FPL results:", "", header, divider, *body]
-            )
+            return "\n".join(["Here are the verified FPL results:", "", _markdown_table(header, body)])
 
     return (
         "I found the relevant FPL data, but could not format a written answer. "
