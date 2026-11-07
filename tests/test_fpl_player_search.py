@@ -57,7 +57,14 @@ class PlayerSearchTests(unittest.TestCase):
                     "team_name": "Arsenal",
                     "position": "DEF",
                     "source_rank": 0,
-                }
+                },
+                {
+                    "player_id": 42,
+                    "player_name": "Calafiori",
+                    "team_name": "Arsenal",
+                    "position": "DEF",
+                    "source_rank": 1,
+                },
             ]
         )
         with patch(
@@ -72,7 +79,15 @@ class PlayerSearchTests(unittest.TestCase):
             result = search_fpl_players("Califiori")
 
         self.assertEqual(result["rows"], [])
-        self.assertEqual(result["suggestions"][0]["player_name"], "Riccardo Calafiori")
+        self.assertEqual(result["suggestions"], [
+            {
+                "player_id": 42,
+                "player_name": "Riccardo Calafiori",
+                "team_name": "Arsenal",
+                "position": "DEF",
+                "source_rank": 0,
+            }
+        ])
 
 
 if __name__ == "__main__":

@@ -947,7 +947,15 @@ def _pending_player_followup_plan(question, conversation_state):
     raw["needs_clarification"] = False
     raw["clarification"] = ""
     raw.pop("pending_player_index", None)
-    return normalise_query_plan(raw), {
+    team_hints = dict(raw.get("player_team_hints") or {})
+    if match.group("team"):
+        team_hints[str(index)] = match.group("team")
+    plan = normalise_query_plan(raw)
+    # This state is produced locally from an explicit user clarification, not
+    # accepted from the model planner.  Keep it outside the planner schema.
+    if team_hints:
+        plan["player_team_hints"] = team_hints
+    return plan, {
         "team": match.group("team"),
         "player_index": index,
     }
@@ -982,6 +990,7 @@ def _answer_planned_question(client, model, question, messages, conversation_sta
 
     team_hint = clarification.get("team") if clarification else None
     team_hint_index = clarification.get("player_index") if clarification else None
+    saved_team_hints = dict(plan.get("player_team_hints") or {})
 
     if plan["intent"] == "unsupported" or plan["needs_clarification"]:
         return (
@@ -1080,7 +1089,10 @@ def _answer_planned_question(client, model, question, messages, conversation_sta
         for index, player_name in enumerate(plan["player_names"]):
             player, _search, message = _resolve_planned_player(
                 player_name,
-                team_hint=team_hint if index == team_hint_index else None,
+                team_hint=(
+                    saved_team_hints.get(str(index))
+                    or (team_hint if index == team_hint_index else None)
+                ),
             )
             if message:
                 pending = dict(plan)

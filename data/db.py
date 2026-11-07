@@ -974,14 +974,28 @@ def _fuzzy_player_suggestions(query, position=None, limit=3):
     )
 
     scored = []
-    seen = set()
+    seen_player_ids = set()
+    seen_names = set()
     for row in _records(candidates):
         player_name = row.get("player_name")
         team_name = row.get("team_name")
-        key = (_normalise_player_name(player_name), _normalise_player_name(team_name))
-        if not player_name or key in seen:
+        if not player_name:
             continue
-        seen.add(key)
+        player_id = row.get("player_id")
+        name_key = (
+            _normalise_player_name(player_name),
+            _normalise_player_name(team_name),
+        )
+        # A live snapshot and the historical index can use different display
+        # names for one FPL element (for example, "Riccardo Calafiori" and
+        # "Calafiori"). Prefer the live row and never offer that player twice.
+        if player_id is not None and player_id in seen_player_ids:
+            continue
+        if name_key in seen_names:
+            continue
+        if player_id is not None:
+            seen_player_ids.add(player_id)
+        seen_names.add(name_key)
         score = _player_name_similarity(query_key, player_name)
         if score >= 0.78:
             scored.append((score, row))

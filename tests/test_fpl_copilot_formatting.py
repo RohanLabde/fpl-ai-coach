@@ -78,6 +78,24 @@ class PlayerAnswerFormatTests(unittest.TestCase):
         self.assertEqual(
             clarification, {"team": "Chelsea", "player_index": 1}
         )
+        self.assertEqual(plan["player_team_hints"], {"1": "Chelsea"})
+
+        follow_up_plan, follow_up_clarification = _pending_player_followup_plan(
+            "Calafiori from Arsenal",
+            {
+                "pending_player_plan": {
+                    **plan,
+                    "pending_player_index": 2,
+                }
+            },
+        )
+        self.assertEqual(
+            follow_up_clarification, {"team": "Arsenal", "player_index": 2}
+        )
+        self.assertEqual(
+            follow_up_plan["player_team_hints"],
+            {"1": "Chelsea", "2": "Arsenal"},
+        )
 
     def test_typo_suggestion_requires_an_explicit_follow_up(self):
         with patch(
