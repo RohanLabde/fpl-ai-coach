@@ -203,6 +203,32 @@ class PlayerAnswerFormatTests(unittest.TestCase):
         self.assertEqual(answer, "comparison")
         self.assertEqual(sources, ["search_fpl_players", "compare_fpl_players"])
 
+    def test_yes_in_an_older_pending_chat_does_not_replan_or_substitute(self):
+        state = {
+            "pending_player_plan": {
+                "intent": "compare_players",
+                "player_names": ["Van Hecke", "White", "Califiori", "Gvardiol"],
+                "position": None,
+                "metric": None,
+                "scope": "recent_form",
+                "gameweeks": 4,
+                "limit": 10,
+                "max_price": None,
+                "needs_clarification": False,
+                "clarification": "",
+                "pending_player_index": 2,
+            }
+        }
+        with patch("data.fpl_copilot.plan_fpl_question") as planner:
+            answer, sources = _answer_planned_question(
+                None, None, "yes", [{"role": "user", "content": "yes"}], state
+            )
+
+        self.assertIn("full name or team", answer)
+        self.assertEqual(sources, [])
+        planner.assert_not_called()
+        self.assertIn("pending_player_plan", state)
+
     def test_recent_form_shows_official_total_and_scoring_events(self):
         answer = _fallback_player_form_answer(
             {

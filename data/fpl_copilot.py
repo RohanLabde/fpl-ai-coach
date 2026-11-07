@@ -1045,6 +1045,19 @@ def _answer_planned_question(client, model, question, messages, conversation_sta
         question, conversation_state
     )
     if plan is None:
+        pending = conversation_state.get("pending_player_plan")
+        if (
+            isinstance(pending, dict)
+            and _CONFIRMATION_REPLY_PATTERN.fullmatch(str(question))
+        ):
+            # Older in-progress chats predate saved suggestion candidates.
+            # Never send an ungrounded confirmation back through the planner.
+            return (
+                "I no longer have the suggested player attached to this earlier "
+                "clarification. Please reply with the player's full name or team, "
+                "and I will continue the comparison safely.",
+                [],
+            )
         conversation_state.pop("pending_player_plan", None)
         clarification = None
         plan = plan_fpl_question(
