@@ -48,6 +48,32 @@ class PlayerSearchTests(unittest.TestCase):
         self.assertIn("'ß', 'ss'", historical_query)
         self.assertIn("normalized_name_pattern", reader.call_args_list[2].args[1])
 
+    def test_typo_returns_a_suggestion_without_selecting_a_player(self):
+        suggestion_candidates = pd.DataFrame(
+            [
+                {
+                    "player_id": 42,
+                    "player_name": "Riccardo Calafiori",
+                    "team_name": "Arsenal",
+                    "position": "DEF",
+                    "source_rank": 0,
+                }
+            ]
+        )
+        with patch(
+            "data.db._read_dataframe",
+            side_effect=[
+                pd.DataFrame(),
+                pd.DataFrame(),
+                pd.DataFrame(),
+                suggestion_candidates,
+            ],
+        ):
+            result = search_fpl_players("Califiori")
+
+        self.assertEqual(result["rows"], [])
+        self.assertEqual(result["suggestions"][0]["player_name"], "Riccardo Calafiori")
+
 
 if __name__ == "__main__":
     unittest.main()

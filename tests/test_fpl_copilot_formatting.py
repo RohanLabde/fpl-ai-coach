@@ -2,6 +2,7 @@
 
 import importlib.util
 import unittest
+from unittest.mock import patch
 
 _FORMATTERS_AVAILABLE = (
     importlib.util.find_spec("streamlit") is not None
@@ -16,6 +17,7 @@ if _FORMATTERS_AVAILABLE:
         _fallback_player_form_answer,
         _fallback_player_profile_answer,
         _pending_player_followup_plan,
+        _resolve_planned_player,
     )
 
 
@@ -76,6 +78,21 @@ class PlayerAnswerFormatTests(unittest.TestCase):
         self.assertEqual(
             clarification, {"team": "Chelsea", "player_index": 1}
         )
+
+    def test_typo_suggestion_requires_an_explicit_follow_up(self):
+        with patch(
+            "data.fpl_copilot._run_tool",
+            return_value={
+                "rows": [],
+                "suggestions": [
+                    {"player_name": "Riccardo Calafiori", "team_name": "Arsenal"}
+                ],
+            },
+        ):
+            player, _result, message = _resolve_planned_player("Califiori")
+
+        self.assertIsNone(player)
+        self.assertIn("Did you mean **Riccardo Calafiori** (Arsenal)?", message)
 
     def test_recent_form_shows_official_total_and_scoring_events(self):
         answer = _fallback_player_form_answer(

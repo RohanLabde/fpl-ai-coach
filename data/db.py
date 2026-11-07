@@ -1,5 +1,6 @@
 import logging
 import unicodedata
+from difflib import SequenceMatcher
 
 import streamlit as st
 import pandas as pd
@@ -898,6 +899,103 @@ def _records(frame):
     )
 
 
+def _player_name_similarity(query, candidate):
+    """Score a short player-name typo against a candidate name.
+
+    This intentionally runs only after the exact, accent-tolerant database
+    search has found no rows.  It is for a suggestion, never auto-selection.
+    """
+    query_key = _normalise_player_name(query).strip()
+    candidate_key = _normalise_player_name(candidate).strip()
+    if not query_key or not candidate_key:
+        return 0.0
+
+    whole_name_score = SequenceMatcher(None, query_key, candidate_key).ratio()
+    token_scores = [
+        SequenceMatcher(None, query_key, token).ratio()
+        for token in candidate_key.split()
+    ]
+    return max([whole_name_score, *token_scores])
+
+
+def _fuzzy_player_suggestions(query, position=None, limit=3):
+    """Return conservative typo suggestions from live and historical names."""
+    query_key = _normalise_player_name(query).strip()
+    if len(query_key) < 4:
+        return []
+
+    params = {}
+    live_position_filter = "AND live.position = :position" if position else ""
+    historical_position_filter = "AND history.position = :position" if position else ""
+    if position:
+        params["position"] = position
+
+    candidates = _read_dataframe(
+        f"""
+        WITH latest_live_snapshot AS (
+            SELECT MAX(snapshot_at) AS snapshot_at
+            FROM public.fpl_live_player_snapshots
+        ),
+        live_candidates AS (
+            SELECT
+                live.player_id,
+                COALESCE(
+                    NULLIF(live.first_name || ' ' || live.second_name, ' '),
+                    live.web_name
+                ) AS player_name,
+                live.team_name,
+                live.position,
+                0 AS source_rank
+            FROM public.fpl_live_player_snapshots AS live
+            INNER JOIN latest_live_snapshot
+                ON live.snapshot_at = latest_live_snapshot.snapshot_at
+            WHERE TRUE {live_position_filter}
+        ),
+        historical_candidates AS (
+            SELECT DISTINCT ON (history.player_name, history.team_name)
+                history.player_id,
+                history.player_name,
+                history.team_name,
+                history.position,
+                1 AS source_rank
+            FROM public.player_gameweek AS history
+            WHERE TRUE {historical_position_filter}
+            ORDER BY history.player_name,
+                     history.team_name,
+                     history.season DESC,
+                     history.gameweek DESC,
+                     history.fixture_id DESC
+        )
+        SELECT * FROM live_candidates
+        UNION ALL
+        SELECT * FROM historical_candidates
+        """,
+        params,
+    )
+
+    scored = []
+    seen = set()
+    for row in _records(candidates):
+        player_name = row.get("player_name")
+        team_name = row.get("team_name")
+        key = (_normalise_player_name(player_name), _normalise_player_name(team_name))
+        if not player_name or key in seen:
+            continue
+        seen.add(key)
+        score = _player_name_similarity(query_key, player_name)
+        if score >= 0.78:
+            scored.append((score, row))
+
+    scored.sort(
+        key=lambda item: (
+            -item[0],
+            item[1].get("source_rank", 1),
+            str(item[1].get("player_name", "")),
+        )
+    )
+    return [row for _, row in scored[:limit]]
+
+
 def search_fpl_players(query, position=None, limit=8):
     """Find a player in the authoritative live snapshot, then historical data."""
     position = position.upper() if position else None
@@ -1037,12 +1135,23 @@ def search_fpl_players(query, position=None, limit=8):
         """,
         params,
     )
+    historical_records = _records(historical_rows)
+    if historical_records:
+        return {
+            "source": (
+                "player_gameweek (historical player index; "
+                "not a current live player snapshot)"
+            ),
+            "rows": historical_records,
+        }
+
     return {
         "source": (
             "player_gameweek (historical player index; "
             "not a current live player snapshot)"
         ),
-        "rows": _records(historical_rows),
+        "rows": [],
+        "suggestions": _fuzzy_player_suggestions(normalized_query, position),
     }
 
 

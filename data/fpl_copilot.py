@@ -856,6 +856,18 @@ def _resolve_planned_player(name, team_hint=None):
 
     rows = result.get("rows", [])
     if not rows:
+        suggestions = result.get("suggestions", [])
+        if suggestions:
+            choices = ", ".join(
+                f"**{row.get('player_name')}** ({row.get('team_name', 'unknown team')})"
+                for row in suggestions
+            )
+            return (
+                None,
+                result,
+                f"I could not find **{name}** in the current or historical FPL player index. "
+                f"Did you mean {choices}? Reply with the full name or add the team to use it.",
+            )
         return (
             None,
             result,
