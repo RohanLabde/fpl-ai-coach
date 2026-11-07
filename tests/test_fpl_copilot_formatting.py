@@ -11,11 +11,13 @@ _FORMATTERS_AVAILABLE = (
 if _FORMATTERS_AVAILABLE:
     from data.fpl_copilot import (
         _availability_summary,
+        _answer_planned_question,
         _ownership_summary,
         _fallback_player_comparison_answer,
         _fallback_player_fixture_answer,
         _fallback_player_form_answer,
         _fallback_player_profile_answer,
+        _comparison_matches_selected_players,
         _pending_player_followup_plan,
         _resolve_planned_player,
     )
@@ -111,6 +113,95 @@ class PlayerAnswerFormatTests(unittest.TestCase):
 
         self.assertIsNone(player)
         self.assertIn("Did you mean **Riccardo Calafiori** (Arsenal)?", message)
+        self.assertIn("Reply **yes** to use that player", message)
+
+    def test_yes_confirms_the_single_saved_suggestion(self):
+        candidate = {
+            "player_id": 8,
+            "player_name": "Riccardo Calafiori",
+            "team_name": "Arsenal",
+        }
+        plan, clarification = _pending_player_followup_plan(
+            "yes",
+            {
+                "pending_player_plan": {
+                    "intent": "compare_players",
+                    "player_names": ["Van Hecke", "Califiori"],
+                    "position": None,
+                    "metric": None,
+                    "scope": "recent_form",
+                    "gameweeks": 4,
+                    "limit": 10,
+                    "max_price": None,
+                    "needs_clarification": False,
+                    "clarification": "",
+                    "pending_player_index": 1,
+                    "pending_player_candidates": {"1": [candidate]},
+                }
+            },
+        )
+
+        self.assertEqual(plan["player_names"][1], "Riccardo Calafiori")
+        self.assertEqual(plan["resolved_players"], {"1": candidate})
+        self.assertEqual(clarification, {"team": "Arsenal", "player_index": 1})
+
+    def test_comparison_rejects_a_different_player_for_a_selected_id(self):
+        expected = [{"player_id": 8, "player_name": "Riccardo Calafiori"}]
+        result = {"rows": [{"player_id": 8, "player_name": "Frank Onyeka"}]}
+        self.assertFalse(_comparison_matches_selected_players(expected, result))
+
+    def test_yes_uses_the_saved_candidate_in_a_comparison(self):
+        players = {
+            "Van Hecke": {"player_id": 1, "player_name": "Van Hecke", "team_name": "Spurs"},
+            "White": {"player_id": 2, "player_name": "White", "team_name": "Arsenal"},
+            "Gvardiol": {"player_id": 4, "player_name": "Gvardiol", "team_name": "Man City"},
+        }
+        calafiori = {
+            "player_id": 8,
+            "player_name": "Riccardo Calafiori",
+            "team_name": "Arsenal",
+        }
+
+        def run_tool(name, arguments):
+            if name == "search_fpl_players":
+                return {"rows": [players[arguments["query"]]]}
+            self.assertEqual(name, "compare_fpl_players")
+            self.assertEqual(arguments["player_ids"], [1, 2, 8, 4])
+            return {
+                "rows": [
+                    players["Van Hecke"],
+                    players["White"],
+                    calafiori,
+                    players["Gvardiol"],
+                ]
+            }
+
+        state = {
+            "pending_player_plan": {
+                "intent": "compare_players",
+                "player_names": ["Van Hecke", "White", "Califiori", "Gvardiol"],
+                "position": None,
+                "metric": None,
+                "scope": "recent_form",
+                "gameweeks": 4,
+                "limit": 10,
+                "max_price": None,
+                "needs_clarification": False,
+                "clarification": "",
+                "pending_player_index": 2,
+                "player_team_hints": {"1": "Arsenal"},
+                "pending_player_candidates": {"2": [calafiori]},
+            }
+        }
+        with patch("data.fpl_copilot._run_tool", side_effect=run_tool), patch(
+            "data.fpl_copilot._compose_evidence_answer", return_value="comparison"
+        ):
+            answer, sources = _answer_planned_question(
+                None, None, "yes", [{"role": "user", "content": "yes"}], state
+            )
+
+        self.assertEqual(answer, "comparison")
+        self.assertEqual(sources, ["search_fpl_players", "compare_fpl_players"])
 
     def test_recent_form_shows_official_total_and_scoring_events(self):
         answer = _fallback_player_form_answer(

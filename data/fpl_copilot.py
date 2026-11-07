@@ -862,11 +862,16 @@ def _resolve_planned_player(name, team_hint=None):
                 f"**{row.get('player_name')}** ({row.get('team_name', 'unknown team')})"
                 for row in suggestions
             )
+            reply_instruction = (
+                "Reply **yes** to use that player, or enter the full name or team."
+                if len(suggestions) == 1
+                else "Reply with the full name or add the team to use it."
+            )
             return (
                 None,
                 result,
                 f"I could not find **{name}** in the current or historical FPL player index. "
-                f"Did you mean {choices}? Reply with the full name or add the team to use it.",
+                f"Did you mean {choices}? {reply_instruction}",
             )
         return (
             None,
@@ -910,6 +915,45 @@ _PLAYER_REPLY_PATTERN = re.compile(
     r"(?:\s+(?:from|at|of)\s+(?P<team>[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'’ -]*))?\s*[.?!]*\s*$",
     re.IGNORECASE,
 )
+_CONFIRMATION_REPLY_PATTERN = re.compile(
+    r"^\s*(?:yes|y|confirm|confirmed|that one)\s*[.!]?\s*$",
+    re.IGNORECASE,
+)
+
+
+def _restore_pending_resolution_state(plan, team_hints, resolved_players):
+    """Restore locally-created state that is deliberately outside the LLM plan."""
+    if team_hints:
+        plan["player_team_hints"] = team_hints
+    if resolved_players:
+        plan["resolved_players"] = resolved_players
+    return plan
+
+
+def _player_names_match(expected, actual):
+    """Accept an unambiguous full-name/surname rendering, never another player."""
+    expected_name = " ".join(str(expected or "").casefold().split())
+    actual_name = " ".join(str(actual or "").casefold().split())
+    return (
+        expected_name == actual_name
+        or expected_name.endswith(f" {actual_name}")
+        or actual_name.endswith(f" {expected_name}")
+    )
+
+
+def _comparison_matches_selected_players(players, result):
+    """Ensure comparison output still represents the selected player identities."""
+    rows_by_id = {
+        int(row["player_id"]): row
+        for row in result.get("rows", [])
+        if row.get("player_id") is not None
+    }
+    for player in players:
+        player_id = int(player["player_id"])
+        row = rows_by_id.get(player_id)
+        if not row or not _player_names_match(player.get("player_name"), row.get("player_name")):
+            return False
+    return len(rows_by_id) == len(players)
 
 
 def _pending_player_followup_plan(question, conversation_state):
@@ -942,19 +986,41 @@ def _pending_player_followup_plan(question, conversation_state):
         return None, None
 
     raw = dict(pending)
+    team_hints = dict(raw.get("player_team_hints") or {})
+    resolved_players = dict(raw.get("resolved_players") or {})
+    pending_candidates = dict(raw.get("pending_player_candidates") or {})
+    suggested_players = list(pending_candidates.get(str(index)) or [])
+
+    if _CONFIRMATION_REPLY_PATTERN.fullmatch(str(question)):
+        if len(suggested_players) != 1:
+            return None, None
+        selected = suggested_players[0]
+        if selected.get("player_id") is None or not selected.get("player_name"):
+            return None, None
+        names[index] = selected["player_name"]
+        raw["player_names"] = names
+        raw["needs_clarification"] = False
+        raw["clarification"] = ""
+        raw.pop("pending_player_index", None)
+        pending_candidates.pop(str(index), None)
+        resolved_players[str(index)] = selected
+        plan = normalise_query_plan(raw)
+        _restore_pending_resolution_state(plan, team_hints, resolved_players)
+        return plan, {"team": selected.get("team_name"), "player_index": index}
+
     names[index] = match.group("name")
     raw["player_names"] = names
     raw["needs_clarification"] = False
     raw["clarification"] = ""
     raw.pop("pending_player_index", None)
-    team_hints = dict(raw.get("player_team_hints") or {})
+    pending_candidates.pop(str(index), None)
+    resolved_players.pop(str(index), None)
     if match.group("team"):
         team_hints[str(index)] = match.group("team")
     plan = normalise_query_plan(raw)
     # This state is produced locally from an explicit user clarification, not
     # accepted from the model planner.  Keep it outside the planner schema.
-    if team_hints:
-        plan["player_team_hints"] = team_hints
+    _restore_pending_resolution_state(plan, team_hints, resolved_players)
     return plan, {
         "team": match.group("team"),
         "player_index": index,
@@ -991,6 +1057,7 @@ def _answer_planned_question(client, model, question, messages, conversation_sta
     team_hint = clarification.get("team") if clarification else None
     team_hint_index = clarification.get("player_index") if clarification else None
     saved_team_hints = dict(plan.get("player_team_hints") or {})
+    saved_resolved_players = dict(plan.get("resolved_players") or {})
 
     if plan["intent"] == "unsupported" or plan["needs_clarification"]:
         return (
@@ -1062,11 +1129,20 @@ def _answer_planned_question(client, model, question, messages, conversation_sta
         "player_profile",
         "upcoming_fixtures",
     }:
-        player, _search_result, message = _resolve_planned_player(
-            plan["player_names"][0], team_hint=team_hint
-        )
+        player = saved_resolved_players.get("0")
+        _search_result = {}
+        message = None
+        if player is None:
+            player, _search_result, message = _resolve_planned_player(
+                plan["player_names"][0], team_hint=team_hint
+            )
         if message:
-            conversation_state["pending_player_plan"] = dict(plan)
+            pending = dict(plan)
+            pending["pending_player_index"] = 0
+            suggestions = _search_result.get("suggestions", [])
+            if len(suggestions) == 1:
+                pending["pending_player_candidates"] = {"0": suggestions}
+            conversation_state["pending_player_plan"] = pending
             return message, ["search_fpl_players"]
         conversation_state.pop("pending_player_plan", None)
 
@@ -1087,16 +1163,25 @@ def _answer_planned_question(client, model, question, messages, conversation_sta
     elif plan["intent"] == "compare_players":
         players = []
         for index, player_name in enumerate(plan["player_names"]):
-            player, _search, message = _resolve_planned_player(
-                player_name,
-                team_hint=(
-                    saved_team_hints.get(str(index))
-                    or (team_hint if index == team_hint_index else None)
-                ),
-            )
+            player = saved_resolved_players.get(str(index))
+            _search = {}
+            message = None
+            if player is None:
+                player, _search, message = _resolve_planned_player(
+                    player_name,
+                    team_hint=(
+                        saved_team_hints.get(str(index))
+                        or (team_hint if index == team_hint_index else None)
+                    ),
+                )
             if message:
                 pending = dict(plan)
                 pending["pending_player_index"] = index
+                suggestions = _search.get("suggestions", [])
+                if len(suggestions) == 1:
+                    candidates = dict(pending.get("pending_player_candidates") or {})
+                    candidates[str(index)] = suggestions
+                    pending["pending_player_candidates"] = candidates
                 conversation_state["pending_player_plan"] = pending
                 return message, ["search_fpl_players"]
             players.append(player)
@@ -1121,6 +1206,14 @@ def _answer_planned_question(client, model, question, messages, conversation_sta
         return (
             "I could not complete the requested FPL data lookup. "
             f"The data source returned: {result['error']}",
+            sources,
+        )
+    if plan["intent"] == "compare_players" and not _comparison_matches_selected_players(
+        players, result
+    ):
+        return (
+            "I could not verify that the comparison data matches every selected player, "
+            "so I have not shown a potentially incorrect table. Please try the player names again.",
             sources,
         )
     return _compose_evidence_answer(
