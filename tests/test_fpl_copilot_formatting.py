@@ -237,6 +237,7 @@ class PlayerAnswerFormatTests(unittest.TestCase):
                 "rows": [
                     {
                         "player_name": "David Raya",
+                        "price": 5.5,
                         "gameweek": 4,
                         "total_points": 14,
                         "minutes": 90,
@@ -260,6 +261,7 @@ class PlayerAnswerFormatTests(unittest.TestCase):
         )
 
         self.assertIn("| GW | Pts | Mins | Starts | Goals | Assists |", answer)
+        self.assertIn("**Current price:** £5.5m.", answer)
         self.assertIn("| 4 | 14 | 90 | 1 | 0 | 0 | 1 | 4 |", answer)
         self.assertIn("| 3 | 38 | 8 | none recorded |", answer)
 
@@ -314,6 +316,7 @@ class PlayerAnswerFormatTests(unittest.TestCase):
                     {
                         "player_name": "Bryan Mbeumo",
                         "team_name": "Man Utd",
+                        "price": 7.9,
                         "selected_by_percent": 8.1,
                         "gameweek": 10,
                         "opponent_team_name": "Everton",
@@ -325,6 +328,7 @@ class PlayerAnswerFormatTests(unittest.TestCase):
         )
 
         self.assertIn("**Current selected by:** 8.1% — Differential.", answer)
+        self.assertIn("**Current price:** £7.9m.", answer)
         self.assertIn("| GW | Opponent | Venue | FDR |", answer)
         self.assertIn("| 10 | Everton | H | 2 |", answer)
 
@@ -340,6 +344,7 @@ class PlayerAnswerFormatTests(unittest.TestCase):
                         "player_name": "David Raya",
                         "team_name": "Arsenal",
                         "position": "GKP",
+                        "price": 5.5,
                         "total_points": 54,
                         "starts": 9,
                         "minutes": 810,
@@ -354,6 +359,7 @@ class PlayerAnswerFormatTests(unittest.TestCase):
                         "player_name": "James Trafford",
                         "team_name": "Leeds",
                         "position": "GKP",
+                        "price": 4.5,
                         "total_points": 44,
                         "starts": 9,
                         "minutes": 810,
@@ -368,9 +374,9 @@ class PlayerAnswerFormatTests(unittest.TestCase):
             },
         )
 
-        self.assertIn("| Rank | Player | Team | Pos | Pts |", answer)
-        self.assertIn("| 1 | David Raya | Arsenal | GKP | 54 |", answer)
-        self.assertIn("| 2 | James Trafford | Leeds | GKP | 44 |", answer)
+        self.assertIn("| Rank | Player | Team | Pos | Price | Pts |", answer)
+        self.assertIn("| 1 | David Raya | Arsenal | GKP | £5.5m | 54 |", answer)
+        self.assertIn("| 2 | James Trafford | Leeds | GKP | £4.5m | 44 |", answer)
         self.assertIn("6.3% — Differential", answer)
 
     def test_availability_keeps_official_playing_chance(self):

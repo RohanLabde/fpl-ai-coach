@@ -1217,6 +1217,7 @@ def get_player_recent_form(player_id, gameweeks=5, window="gameweeks"):
                 history.expected_goal_involvements,
                 history.creativity,
                 history.threat,
+                live.price,
                 live.selected_by_percent,
                 'completed_fixture' AS data_grain
             FROM public.player_gameweek AS history
@@ -1335,7 +1336,7 @@ def get_player_recent_form(player_id, gameweeks=5, window="gameweeks"):
                     AND completed.gameweek = history.gameweek
               )
         )
-        SELECT form.*, live.selected_by_percent
+        SELECT form.*, live.price, live.selected_by_percent
         FROM (
             SELECT * FROM completed_gameweeks
             UNION ALL
@@ -1878,6 +1879,7 @@ def get_current_season_leaderboard(
         )
         SELECT
             ranked.*,
+            live.price,
             live.selected_by_percent,
             live.status,
             live.chance_of_playing_next_round,
@@ -2518,6 +2520,7 @@ def get_player_upcoming_fixtures(player_id, limit=5):
                 ) AS player_name,
                 team_id,
                 team_name,
+                price,
                 selected_by_percent,
                 snapshot_at
             FROM public.fpl_live_player_snapshots
@@ -2528,6 +2531,7 @@ def get_player_upcoming_fixtures(player_id, limit=5):
             lp.snapshot_at,
             lp.player_name,
             lp.team_name,
+            lp.price,
             lp.selected_by_percent,
             ff.gameweek,
             ff.kickoff_time,

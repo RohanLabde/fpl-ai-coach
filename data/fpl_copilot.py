@@ -147,6 +147,11 @@ def _format_value(value, decimal_places=1):
     return str(value)
 
 
+def _format_price(value):
+    """Format the current FPL price consistently wherever a player is shown."""
+    return "—" if value is None else f"£{_format_value(value)}m"
+
+
 def _table_cell(value):
     """Keep evidence safe and readable inside a Markdown table cell."""
     return str(value).replace("|", "\\|").replace("\n", " ")
@@ -208,7 +213,7 @@ def _fallback_leaderboard_answer(plan, result):
         lines.append(" ".join(coverage))
     lines.append("")
 
-    headers = ["Rank", "Player", "Team", "Pos"]
+    headers = ["Rank", "Player", "Team", "Pos", "Price"]
     if metric == "defensive":
         headers.extend(
             ["Clean sheets", "Def. contrib./90", "Starts", "Selected by"]
@@ -279,7 +284,14 @@ def _fallback_leaderboard_answer(plan, result):
                 [_format_value(row.get("total_bonus"), 0), _ownership_summary(row)]
             )
         table_rows.append(
-            [rank, name, team, row.get("position") or "—", *values]
+            [
+                rank,
+                name,
+                team,
+                row.get("position") or "—",
+                _format_price(row.get("price")),
+                *values,
+            ]
         )
         availability = _availability_summary(row)
         if availability != "Available":
@@ -408,7 +420,7 @@ def _fallback_player_profile_answer(result):
     lines = [
         f"**{name}** — {position}, {team}",
         "",
-        f"- **FPL price:** {_format_value(row.get('price'))}",
+        f"- **FPL price:** {_format_price(row.get('price'))}",
         f"- **Season points:** {_format_value(row.get('total_points'), 0)}",
         f"- **Current FPL form:** {_format_value(row.get('form'))}",
         f"- **Current selected by:** {_ownership_summary(row)}",
@@ -461,6 +473,9 @@ def _fallback_player_form_answer(result):
         ),
     ]
     ownership = _ownership_summary(rows[0])
+    price = _format_price(rows[0].get("price"))
+    if price != "—":
+        lines.append(f"**Current price:** {price}.")
     if ownership != "Ownership not provided":
         lines.append(f"**Current selected by:** {ownership}.")
     if source:
@@ -548,6 +563,9 @@ def _fallback_player_fixture_answer(result):
     team = first.get("team_name") or "team unknown"
     lines = [f"**Upcoming fixtures — {name} ({team})**"]
     ownership = _ownership_summary(first)
+    price = _format_price(first.get("price"))
+    if price != "—":
+        lines.append(f"**Current price:** {price}.")
     if ownership != "Ownership not provided":
         lines.append(f"**Current selected by:** {ownership}.")
     lines.append("")
@@ -592,8 +610,7 @@ def _fallback_player_comparison_answer(result):
         return _table_cell(f"{name} ({position}, {team})")
 
     def price(row):
-        value = row.get("price")
-        return "—" if value is None else f"£{_format_value(value)}m"
+        return _format_price(row.get("price"))
 
     metrics = [
         ("Current price", price),
@@ -732,7 +749,7 @@ def _fallback_fpl_pick_answer(result):
             rank,
             row.get("player_name", "Unknown player"),
             row.get("team_name", "Unknown team"),
-            f"£{_format_value(row.get('price'))}m",
+            _format_price(row.get("price")),
             _ownership_summary(row),
             _format_value(row.get("season_points"), 0),
             _format_value(row.get("season_starts"), 0),
