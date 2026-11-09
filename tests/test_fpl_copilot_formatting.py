@@ -374,10 +374,37 @@ class PlayerAnswerFormatTests(unittest.TestCase):
             },
         )
 
-        self.assertIn("| Rank | Player | Team | Pos | Price | Pts |", answer)
+        self.assertIn("| Rank | Player | Team | Pos | Price | FPL pts — season |", answer)
         self.assertIn("| 1 | David Raya | Arsenal | GKP | £5.5m | 54 |", answer)
         self.assertIn("| 2 | James Trafford | Leeds | GKP | £4.5m | 44 |", answer)
         self.assertIn("6.3% — Differential", answer)
+
+    def test_defensive_leaderboard_keeps_period_points_for_comparison(self):
+        answer = _fallback_leaderboard_answer(
+            {"metric": "defensive"},
+            {
+                "metric": "defensive",
+                "gameweeks": 4,
+                "rows": [
+                    {
+                        "player_name": "Defender One",
+                        "team_name": "Arsenal",
+                        "position": "DEF",
+                        "price": 5.5,
+                        "total_points": 26,
+                        "total_clean_sheets": 3,
+                        "defensive_contribution_per_90": 7.4,
+                        "starts": 4,
+                        "selected_by_percent": 8.1,
+                        "status": "a",
+                        "season_completed_gameweeks": 4,
+                    }
+                ],
+            },
+        )
+
+        self.assertIn("FPL pts — last 4 GWs", answer)
+        self.assertIn("| 1 | Defender One | Arsenal | DEF | £5.5m | 26 | 3 |", answer)
 
     def test_availability_keeps_official_playing_chance(self):
         self.assertEqual(

@@ -195,6 +195,13 @@ def _fallback_leaderboard_answer(plan, result):
     ranking_basis = result.get("ranking_basis") or metric.replace("_", " ")
     completed_gameweeks = rows[0].get("season_completed_gameweeks")
     minimum_starts = result.get("minimum_starts")
+    period_gameweeks = result.get("gameweeks")
+    points_label = (
+        f"FPL pts — last {period_gameweeks} GW"
+        f"{'' if period_gameweeks == 1 else 's'}"
+        if period_gameweeks is not None
+        else "FPL pts — season"
+    )
 
     coverage = []
     if completed_gameweeks is not None:
@@ -216,14 +223,24 @@ def _fallback_leaderboard_answer(plan, result):
     headers = ["Rank", "Player", "Team", "Pos", "Price"]
     if metric == "defensive":
         headers.extend(
-            ["Clean sheets", "Def. contrib./90", "Starts", "Selected by"]
+            [
+                points_label,
+                "Clean sheets",
+                "Def. contrib./90",
+                "Starts",
+                "Selected by",
+            ]
         )
     elif metric == "goalkeeping":
-        headers.extend(["Clean sheets", "Saves/90", "Starts", "Selected by"])
+        headers.extend(
+            [points_label, "Clean sheets", "Saves/90", "Starts", "Selected by"]
+        )
     elif metric in {"attacking", "xgi"}:
-        headers.extend(["xGI", "xGI/90", "Goals", "Assists", "Starts", "Selected by"])
+        headers.extend(
+            [points_label, "xGI", "xGI/90", "Goals", "Assists", "Starts", "Selected by"]
+        )
     else:
-        headers.extend(["Pts", "Starts", "Mins"])
+        headers.extend([points_label, "Starts", "Mins"])
         if all(row.get("position") == "GKP" for row in rows):
             headers.extend(["Clean sheets", "Saves", "Bonus", "Selected by"])
         else:
@@ -238,6 +255,7 @@ def _fallback_leaderboard_answer(plan, result):
 
         if metric == "defensive":
             values = [
+                _format_value(row.get("total_points"), 0),
                 _format_value(row.get("total_clean_sheets"), 0),
                 _format_value(row.get("defensive_contribution_per_90")),
                 starts,
@@ -245,6 +263,7 @@ def _fallback_leaderboard_answer(plan, result):
             ]
         elif metric == "goalkeeping":
             values = [
+                _format_value(row.get("total_points"), 0),
                 _format_value(row.get("total_clean_sheets"), 0),
                 _format_value(row.get("saves_per_90")),
                 starts,
@@ -252,6 +271,7 @@ def _fallback_leaderboard_answer(plan, result):
             ]
         elif metric in {"attacking", "xgi"}:
             values = [
+                _format_value(row.get("total_points"), 0),
                 _format_value(row.get("total_xgi")),
                 _format_value(row.get("xgi_per_90")),
                 _format_value(row.get("total_goals"), 0),
